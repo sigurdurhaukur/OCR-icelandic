@@ -9,3 +9,8 @@ dependencies = [
     "omegaconf>=2.3.0",
     "datasets>=4.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.30.1",
+]
