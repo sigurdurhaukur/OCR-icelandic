@@ -1,3 +1,9 @@
+"""
+Script to prepare a dataset with images generated from text data.
+Handles text overflow by creating multiple images if necessary.
+Saves the new dataset to disk and optionally pushes it to the Hugging Face Hub.
+"""
+
 import logging
 import sys
 from dataclasses import dataclass
