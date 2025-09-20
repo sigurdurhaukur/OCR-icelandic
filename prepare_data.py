@@ -1,8 +1,41 @@
+import logging
+import sys
+from dataclasses import dataclass
+
 from datasets import Dataset, Image, load_dataset
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from utils import create_image_with_text
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DataConfig:
+    dataset_path: str = "mideind/is_prototyping_corpus"
+    max_length: int = 512
+    max_entries: int = 10
+    image_width: int = 512
+    image_height: int = 512
+    image_dpi: int = 72
+    img_background_color: str = "white"
+    font_path: str = "/System/Library/Fonts/Supplemental/Arial.ttf"
+    font_size: int = 12
+    font_color: str = "black"
+    text_vertical_alignment: str = "center"  # top, middle, bottom
+    text_horizontal_alignment: str = "left"  # left, center, right
+    output_path: str = "isl_synthetic_ocr_output"  # Directory to save dataset
+    num_examples: int = 1000  # Number of examples to generate
+    push_to_hub: bool = False  # Whether to push dataset to Hugging Face Hub
+    hub_repo_id: str = (
+        "Sigurdur/isl_synthetic_ocr"  # Hugging Face repo ID to push dataset
+    )
 
 
 def generate_image_dataset(texts, cfg):
@@ -13,19 +46,19 @@ def generate_image_dataset(texts, cfg):
     new_data = {"text": [], "image": []}
 
     # Get settings from config
-    width = cfg.image.width
-    height = cfg.image.height
-    dpi = cfg.image.dpi
-    font_size = cfg.font.size
-    alignment = cfg.text.horizontal_alignment
-    font_path = cfg.font.path
-    bg_color = cfg.image.background_color
-    font_color = cfg.font.color
-    vertical_alignment = cfg.text.vertical_alignment
+    width = cfg.image_width
+    height = cfg.image_height
+    dpi = cfg.image_dpi
+    font_size = cfg.font_size
+    alignment = cfg.text_horizontal_alignment
+    font_path = cfg.font_path
+    bg_color = cfg.img_background_color
+    font_color = cfg.font_color
+    vertical_alignment = cfg.text_vertical_alignment
 
     # fix number of examples to generate if specified
-    if cfg.output.get("num_examples"):
-        texts = texts[: cfg.output.num_examples]
+    if cfg.num_examples:
+        texts = texts[: cfg.num_examples]
 
     print("Generating images from text...")
     for text in tqdm(texts):
@@ -60,21 +93,17 @@ def generate_image_dataset(texts, cfg):
     return image_dataset
 
 
-if __name__ == "__main__":
-    # Load configuration
-    cfg = OmegaConf.load("config.yaml")
-
+def create_image_dataset(cfg: DataConfig) -> None:
     # load dataset
-    text_dataset_cfg = cfg.text_dataset
     dataset = load_dataset(
-        text_dataset_cfg.dataset_path,
+        cfg.dataset_path,
         "igc",
         split=f"train",
     )
 
     # select number of entries if specified
-    if text_dataset_cfg.get("max_entries"):
-        dataset = dataset.select(range(text_dataset_cfg.max_entries))
+    if cfg.max_entries:
+        dataset = dataset.select(range(cfg.max_entries))
 
     texts = dataset["text"]
 
@@ -85,7 +114,7 @@ if __name__ == "__main__":
     print(f"New image dataset size: {len(image_dataset)}")
 
     # Save the new dataset
-    output_path = cfg.output.path
+    output_path = cfg.output_path
     image_dataset.save_to_disk(output_path)
     print(f"Image dataset saved to {output_path}")
 
@@ -100,7 +129,26 @@ if __name__ == "__main__":
         image_dataset[0]["image"].show()
 
     # upload to huggingface dataset hub
-    if cfg.output.get("push_to_hub") and cfg.output.get("hub_repo_id"):
-        print(f"Pushing dataset to the hub at {cfg.output.hub_repo_id}...")
-        image_dataset.push_to_hub(cfg.output.hub_repo_id)
+    if cfg.push_to_hub and cfg.hub_repo_id:
+        print(f"Pushing dataset to the hub at {cfg.hub_repo_id}...")
+        image_dataset.push_to_hub(cfg.hub_repo_id)
         print("Dataset pushed to the hub successfully.")
+
+
+def main() -> None:
+    """main function"""
+    cfg = OmegaConf.structured(DataConfig)
+    cli_cfg = OmegaConf.from_cli()
+    cfg = OmegaConf.merge(cfg, cli_cfg)
+    cfg = OmegaConf.to_container(cfg, resolve=True)
+    try:
+        cfg = DataConfig(**cfg)
+    except TypeError as e:  # pylint: disable=broad-exception-raised
+        logger.error(f"Error: {e}\n\nUsage: python scratch.py")
+        sys.exit(1)
+
+    create_image_dataset(cfg)
+
+
+if __name__ == "__main__":
+    main()
