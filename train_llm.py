@@ -100,7 +100,7 @@ def generate_text(
 
 def sanity_check(text_model: AutoModelForCausalLM, tokenizer: AutoTokenizer) -> None:
     # Sanity check - generate text before training
-    prompt = "Once upon a time in a land far, far away,"
+    prompt = "Einu sinni var"
     logger.info("Before training:")
     logger.info(generate_text(text_model, tokenizer, prompt))
 
@@ -217,6 +217,9 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
     # Print trainable parameters info
     text_model.print_trainable_parameters()
 
+    # sanity check before training
+    sanity_check(text_model, tokenizer)
+
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=False,  # False for causal LM (GPT-style), True for masked LM (BERT-style)
@@ -258,13 +261,7 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
 
     logger.info("Training complete!")
     logger.info("After training:")
-    logger.info(
-        generate_text(
-            text_model=text_model,
-            tokenizer=tokenizer,
-            prompt="Einu sinni var einn maður sem bjó í fjöllunum og",
-        )
-    )
+    sanity_check(text_model, tokenizer)  # check if Icelandic generation works/improves
 
     # Merge LoRA weights back into the base model for inference
     # (This creates a single model file but loses the memory efficiency of LoRA)
