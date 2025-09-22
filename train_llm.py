@@ -153,13 +153,19 @@ def get_text_model_from_idefics3(
 def fooberino(cfg: TrainConfig) -> None:
     """Main function to fine-tune the text model within Idefics3 using LoRA."""
 
+    logger.info(f"Using device: {DEVICE}")
+    logger.info(f"Loading model {cfg.model_id}...")
+
     # Load the original model
     model = Idefics3ForConditionalGeneration.from_pretrained(
         cfg.model_id,
         torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        # attn_implementation="flash_attention_2",
     ).to(DEVICE)
 
+    logger.info("Model loaded.")
+
+    logger.info("Extracting text model from Idefics3...")
     # Extract the text model (Llama)
     text_model = get_text_model_from_idefics3(model)
 
