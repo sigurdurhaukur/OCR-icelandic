@@ -47,6 +47,10 @@ class TrainConfig:
 
     # Model configuration
     model_id: str = "HuggingFaceTB/SmolVLM-Base"  # Base model ID
+    push_to_hub: bool = False  # Whether to push trained model to Hugging Face Hub
+    hub_repo_id: str = (
+        "Sigurdur/SmolVLM-Base-ICELANDIC"  # Hugging Face repo ID to push model
+    )
 
     # LoRA configuration
     lora_r: int = 16  # Rank of adaptation - higher values = more parameters but potentially better performance
@@ -135,6 +139,8 @@ def prepare_text_dataset(
 def get_text_model_from_idefics3(
     model: Idefics3ForConditionalGeneration,
 ) -> AutoModelForCausalLM:
+    # this function takes around 1 minute to run on a NVIDIA L40s (48 GB VRAM)
+
     # Load just the text model (Llama) directly
     logger.info("Loading text model from Idefics3...")
     config = model.config.text_config
@@ -256,14 +262,21 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
         generate_text(
             text_model=text_model,
             tokenizer=tokenizer,
-            prompt="Once upon a time in a land far, far away,",
+            prompt="Einu sinni var einn maður sem bjó í fjöllunum og",
         )
     )
 
     # Merge LoRA weights back into the base model for inference
     # (This creates a single model file but loses the memory efficiency of LoRA)
-    # merged_model = text_model.merge_and_unload()
-    # merged_model.save_pretrained("./merged_model")
+    merged_model = text_model.merge_and_unload()
+    merged_model.save_pretrained("./merged_model")
+
+    # Optionally push to Hugging Face Hub
+    if cfg.push_to_hub and cfg.hub_repo_id:
+        logger.info(f"Pushing model to the hub at {cfg.hub_repo_id}...")
+        text_model.push_to_hub(cfg.hub_repo_id + "-lora")
+        logger.info("Model pushed to the hub successfully.")
+        text_model.push_to_hub(cfg.hub_repo_id)
 
 
 def main() -> None:
