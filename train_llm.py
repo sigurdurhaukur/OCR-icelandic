@@ -252,7 +252,13 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
 
     logger.info("Training complete!")
     logger.info("After training:")
-    logger.info(generate_text("Once upon a time in a land far, far away,"))
+    logger.info(
+        generate_text(
+            text_model=text_model,
+            tokenizer=tokenizer,
+            prompt="Once upon a time in a land far, far away,",
+        )
+    )
 
     # Merge LoRA weights back into the base model for inference
     # (This creates a single model file but loses the memory efficiency of LoRA)
