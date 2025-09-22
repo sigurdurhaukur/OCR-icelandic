@@ -105,6 +105,7 @@ def prepare_text_dataset(
     cfg: TrainConfig, tokenizer: AutoTokenizer
 ) -> torch.utils.data.Dataset:
     # Load and prepare dataset
+    logger.info(f"Loading dataset {cfg.hf_dataset_id}...")
     ds = load_dataset(cfg.hf_dataset_id, cfg.hf_data_directory, split=cfg.dataset_split)
 
     # Tokenize dataset
@@ -116,11 +117,18 @@ def prepare_text_dataset(
             max_length=cfg.max_length,
         )
 
+    logger.info("Tokenizing dataset...")
     train_dataset = ds.map(
         tokenize_function,
         batched=True,
         remove_columns=ds.column_names,  # Remove original columns to save memory
     )
+
+    if cfg.max_entries > 0:
+        train_dataset = train_dataset.select(range(cfg.max_entries))
+
+    logger.info(f"Dataset size: {len(train_dataset)}")
+
     return train_dataset
 
 
@@ -128,6 +136,7 @@ def get_text_model_from_idefics3(
     model: Idefics3ForConditionalGeneration,
 ) -> AutoModelForCausalLM:
     # Load just the text model (Llama) directly
+    logger.info("Loading text model from Idefics3...")
     config = model.config.text_config
     text_model = AutoModelForCausalLM.from_config(config)
 
@@ -145,12 +154,13 @@ def get_text_model_from_idefics3(
     remapped_state["lm_head.weight"] = model.lm_head.weight
 
     # Now load everything at once
+    logger.info("Loading state dict into text model...")
     text_model.load_state_dict(remapped_state, strict=True)
 
     return text_model
 
 
-def fooberino(cfg: TrainConfig) -> None:
+def fine_tune_text_model(cfg: TrainConfig) -> None:
     """Main function to fine-tune the text model within Idefics3 using LoRA."""
 
     logger.info(f"Using device: {DEVICE}")
@@ -262,7 +272,7 @@ def main() -> None:
         logger.error(f"Error: {e}\n\nUsage: python scratch.py")
         sys.exit(1)
 
-    fooberino(cfg)
+    fine_tune_text_model(cfg)
 
 
 if __name__ == "__main__":
