@@ -6,9 +6,19 @@ and prepares the model for training on a custom dataset.
 
 Core idea is to embed icelandic language understanding into the text model, before trying to
 fine-tune the full Idefics3 model on image-text pairs.
+
+Before running:
+
+1. activate the uv environment: `source .venv/bin/activate`
+2. install requirements: `pip install -r requirements.txt`
+3. login to Hugging Face Hub: `huggingface-cli login`
+4. configure wandb with `wandb login` then `wandb init` in the root directory of this repo
+
+usage: python train_llm.py push_to_hub=True
 """
 
 import logging
+import os
 import sys
 from dataclasses import dataclass
 
@@ -72,7 +82,7 @@ class TrainConfig:
     fp16: bool = True  # Use mixed precision training if True
     dataloader_drop_last: bool = True  # Drop last incomplete batch if True
     remove_unused_columns: bool = False  # Whether to remove unused columns in dataset
-    report_to: str = "none"  # Disable reporting to wandb/tensorboard
+    report_to: str = "wandb"  # Report to wandb
 
 
 # Inference function for text generation
@@ -82,6 +92,8 @@ def generate_text(
     prompt: str,
     max_length: int = 50,
 ) -> str:
+    """Generate text from the model given a prompt."""
+
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
     with torch.no_grad():
         outputs = text_model.generate(
@@ -99,8 +111,9 @@ def generate_text(
 
 
 def sanity_check(text_model: AutoModelForCausalLM, tokenizer: AutoTokenizer) -> None:
+    """Sanity check to see if the model can generate Icelandic text."""
     # Sanity check - generate text before training
-    prompt = "Einu sinni var"
+    prompt = "Einu sinni var karl og kerling sem bjuggu í"
     logger.info("Before training:")
     logger.info(generate_text(text_model, tokenizer, prompt))
 
@@ -108,6 +121,17 @@ def sanity_check(text_model: AutoModelForCausalLM, tokenizer: AutoTokenizer) -> 
 def prepare_text_dataset(
     cfg: TrainConfig, tokenizer: AutoTokenizer
 ) -> torch.utils.data.Dataset:
+    """
+    Loads and tokenizes the text dataset for training.
+
+    Args:
+        cfg (TrainConfig): Configuration for dataset and training.
+        tokenizer (AutoTokenizer): Tokenizer for the text model.
+
+    Returns:
+        torch.utils.data.Dataset: Tokenized dataset ready for training.
+    """
+
     # Load and prepare dataset
     logger.info(f"Loading dataset {cfg.hf_dataset_id}...")
     ds = load_dataset(cfg.hf_dataset_id, cfg.hf_data_directory, split=cfg.dataset_split)
@@ -139,7 +163,21 @@ def prepare_text_dataset(
 def get_text_model_from_idefics3(
     model: Idefics3ForConditionalGeneration,
 ) -> AutoModelForCausalLM:
-    # this function takes around 1 minute to run on a NVIDIA L40s (48 GB VRAM)
+    """Extracts the text model (Llama) from the Idefics3 model.
+
+    note: This function takes around 1 minute to run on a NVIDIA L40s (48 GB VRAM)
+
+    The key steps are:
+    - Load just the text model configuration from Idefics3
+    - Create a new AutoModelForCausalLM instance with that config
+    - Remap the state dict from Idefics3 to match what AutoModelForCausalLM expects
+    - Load the remapped state dict into the new text model
+
+    Args:
+        model (Idefics3ForConditionalGeneration): The full Idefics3 model.
+    Returns:
+        AutoModelForCausalLM: The extracted text model.
+    """
 
     # Load just the text model (Llama) directly
     logger.info("Loading text model from Idefics3...")
@@ -167,7 +205,13 @@ def get_text_model_from_idefics3(
 
 
 def fine_tune_text_model(cfg: TrainConfig) -> None:
-    """Main function to fine-tune the text model within Idefics3 using LoRA."""
+    """
+    Main function to fine-tune the text model within Idefics3 using LoRA.
+    Args:
+        cfg (TrainConfig): Configuration for dataset, model, and training.
+    Returns:
+        None
+    """
 
     logger.info(f"Using device: {DEVICE}")
     logger.info(f"Loading model {cfg.model_id}...")
