@@ -8,8 +8,13 @@ Core idea is to embed icelandic language understanding into the text model, befo
 fine-tune the full Idefics3 model on image-text pairs.
 """
 
+import logging
+import sys
+from dataclasses import dataclass
+
 import torch
 from datasets import load_dataset
+from omegaconf import OmegaConf
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
@@ -20,71 +25,59 @@ from transformers import (
     TrainingArguments,
 )
 
-model_id = "HuggingFaceTB/SmolVLM-Base"
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load the original model
-model = Idefics3ForConditionalGeneration.from_pretrained(
-    model_id,
-    torch_dtype=torch.bfloat16,
-    # *attn*implementation="flash_attention_2",
-).to(DEVICE)
 
-# Load just the text model (Llama) directly
-config = model.config.text_config
-text_model = AutoModelForCausalLM.from_config(config)
+@dataclass
+class TrainConfig:
+    # Dataset configuration
+    hf_dataset_id: str = "arnastofnun/IGC-2024"  # Hugging Face dataset ID
+    hf_data_directory: str = "wiki"  # Subdirectory within the dataset
+    dataset_split: str = "train[:1%]"  # Dataset split to use for
+    max_length: int = 512  # Max token length for text sequences
+    max_entries: int = 10  # Max entries to process from dataset (for quick testing)
+    text_key: str = "document"  # Key in dataset containing text data
 
-# The text_model from Idefics3 doesn't have the outer 'model' wrapper
-# but AutoModelForCausalLM expects it. So we need to adjust the state dict:
-# Get the state dict from Idefics3's text model
-source_state = model.model.text_model.state_dict()
+    # Model configuration
+    model_id: str = "HuggingFaceTB/SmolVLM-Base"  # Base model ID
 
-# Add the 'model.' prefix to match what AutoModelForCausalLM expects
-remapped_state = {}
-for key, value in source_state.items():
-    remapped_state[f"model.{key}"] = value
+    # LoRA configuration
+    lora_r: int = 16  # Rank of adaptation - higher values = more parameters but potentially better performance
+    lora_alpha: int = 32  # LoRA scaling parameter - typically 2x the rank
+    lora_dropout: float = 0.1  # Dropout for LoRA layers
 
-# Also add the lm_head weights
-remapped_state["lm_head.weight"] = model.lm_head.weight
-
-# Now load everything at once
-text_model.load_state_dict(remapped_state, strict=True)
-
-# Load tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_id)
-
-# Configure LoRA
-lora_config = LoraConfig(
-    task_type=TaskType.CAUSAL_LM,
-    inference_mode=False,
-    r=16,  # Rank of adaptation - higher values = more parameters but potentially better performance
-    lora_alpha=32,  # LoRA scaling parameter - typically 2x the rank
-    lora_dropout=0.1,  # Dropout for LoRA layers
-    target_modules=[
-        "q_proj",  # Query projection
-        "k_proj",  # Key projection
-        "v_proj",  # Value projection
-        "o_proj",  # Output projection
-        "gate_proj",  # Gate projection (for feedforward)
-        "up_proj",  # Up projection (for feedforward)
-        "down_proj",  # Down projection (for feedforward)
-    ],
-    bias="none",  # Whether to train bias parameters
-    use_rslora=False,  # Use rank-stabilized LoRA
-)
-
-# Apply LoRA to the model
-text_model = get_peft_model(text_model, lora_config)
-
-# Move to device
-text_model.to(DEVICE)
-
-# Print trainable parameters info
-text_model.print_trainable_parameters()
+    # Training arguments
+    output_dir: str = (
+        "./lora_results"  # Directory to save LoRA adapters and checkpoints
+    )
+    per_device_train_batch_size: int = 4  # Batch size per device during training
+    gradient_accumulation_steps: int = 4  # Number of steps to accumulate gradients
+    num_train_epochs: int = 3  # Total number of training epochs
+    learning_rate: float = 1e-4  # Learning rate for optimizer
+    warmup_steps: int = 100  # Number of warmup steps for learning rate scheduler
+    logging_steps: int = 50  # Log every X updates steps
+    save_strategy: str = "epoch"  # Save checkpoint every X epochs
+    eval_strategy: str = "no"  # Evaluation strategy during training
+    fp16: bool = True  # Use mixed precision training if True
+    dataloader_drop_last: bool = True  # Drop last incomplete batch if True
+    remove_unused_columns: bool = False  # Whether to remove unused columns in dataset
+    report_to: str = "none"  # Disable reporting to wandb/tensorboard
 
 
 # Inference function for text generation
-def generate_text(prompt, max_length=50):
+def generate_text(
+    text_model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    prompt: str,
+    max_length: int = 50,
+) -> str:
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
     with torch.no_grad():
         outputs = text_model.generate(
@@ -101,72 +94,170 @@ def generate_text(prompt, max_length=50):
     return generated_text
 
 
-# Example usage
-print("Before training:")
-print(generate_text("Once upon a time in a land far, far away,"))
-
-# Load and prepare dataset
-ds = load_dataset("arnastofnun/IGC-2024", "wiki", split="train[:1%]")
-
-data_collator = DataCollatorForLanguageModeling(
-    tokenizer=tokenizer,
-    mlm=False,  # False for causal LM (GPT-style), True for masked LM (BERT-style)
-)
+def sanity_check(text_model: AutoModelForCausalLM, tokenizer: AutoTokenizer) -> None:
+    # Sanity check - generate text before training
+    prompt = "Once upon a time in a land far, far away,"
+    logger.info("Before training:")
+    logger.info(generate_text(text_model, tokenizer, prompt))
 
 
-# Tokenize dataset
-def tokenize_function(examples):
-    return tokenizer(
-        examples["document"],
-        truncation=True,
-        padding="max_length",
-        max_length=512,  # Adjust based on your needs and memory
+def prepare_text_dataset(
+    cfg: TrainConfig, tokenizer: AutoTokenizer
+) -> torch.utils.data.Dataset:
+    # Load and prepare dataset
+    ds = load_dataset(cfg.hf_dataset_id, cfg.hf_data_directory, split=cfg.dataset_split)
+
+    # Tokenize dataset
+    def tokenize_function(examples):
+        return tokenizer(
+            examples[cfg.text_key],
+            truncation=True,
+            padding="max_length",
+            max_length=cfg.max_length,
+        )
+
+    train_dataset = ds.map(
+        tokenize_function,
+        batched=True,
+        remove_columns=ds.column_names,  # Remove original columns to save memory
+    )
+    return train_dataset
+
+
+def get_text_model_from_idefics3(
+    model: Idefics3ForConditionalGeneration,
+) -> AutoModelForCausalLM:
+    # Load just the text model (Llama) directly
+    config = model.config.text_config
+    text_model = AutoModelForCausalLM.from_config(config)
+
+    # The text_model from Idefics3 doesn't have the outer 'model' wrapper
+    # but AutoModelForCausalLM expects it. So we need to adjust the state dict:
+    # Get the state dict from Idefics3's text model
+    source_state = model.model.text_model.state_dict()
+
+    # Add the 'model.' prefix to match what AutoModelForCausalLM expects
+    remapped_state = {}
+    for key, value in source_state.items():
+        remapped_state[f"model.{key}"] = value
+
+    # Also add the lm_head weights
+    remapped_state["lm_head.weight"] = model.lm_head.weight
+
+    # Now load everything at once
+    text_model.load_state_dict(remapped_state, strict=True)
+
+    return text_model
+
+
+def fooberino(cfg: TrainConfig) -> None:
+    """Main function to fine-tune the text model within Idefics3 using LoRA."""
+
+    # Load the original model
+    model = Idefics3ForConditionalGeneration.from_pretrained(
+        cfg.model_id,
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    ).to(DEVICE)
+
+    # Extract the text model (Llama)
+    text_model = get_text_model_from_idefics3(model)
+
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(cfg.model_id)
+
+    # Configure LoRA
+    lora_config = LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        inference_mode=False,
+        r=cfg.lora_r,  # Rank of adaptation - higher values = more parameters but potentially better performance
+        lora_alpha=cfg.lora_alpha,  # LoRA scaling parameter - typically 2x the rank
+        lora_dropout=cfg.lora_dropout,  # Dropout for LoRA layers
+        target_modules=[
+            "q_proj",  # Query projection
+            "k_proj",  # Key projection
+            "v_proj",  # Value projection
+            "o_proj",  # Output projection
+            "gate_proj",  # Gate projection (for feedforward)
+            "up_proj",  # Up projection (for feedforward)
+            "down_proj",  # Down projection (for feedforward)
+        ],
+        bias="none",  # Whether to train bias parameters
+        use_rslora=False,  # Use rank-stabilized LoRA
     )
 
+    # Apply LoRA to the model
+    text_model = get_peft_model(text_model, lora_config)
 
-train_dataset = ds.map(
-    tokenize_function,
-    batched=True,
-    remove_columns=ds.column_names,  # Remove original columns to save memory
-)
+    # Move to device
+    text_model.to(DEVICE)
 
-# Training arguments - adjusted for LoRA
-training_args = TrainingArguments(
-    output_dir="./lora_results",
-    per_device_train_batch_size=4,  # Can use larger batch size with LoRA
-    gradient_accumulation_steps=4,
-    num_train_epochs=3,
-    learning_rate=1e-4,  # Slightly higher learning rate is often good for LoRA
-    warmup_steps=100,
-    logging_steps=50,
-    save_strategy="epoch",
-    eval_strategy="no",
-    fp16=True,  # or bf16=True if supported
-    dataloader_drop_last=True,
-    remove_unused_columns=False,
-    report_to="none",  # Disable wandb/tensorboard logging
-)
+    # Print trainable parameters info
+    text_model.print_trainable_parameters()
 
-# Create trainer
-trainer = Trainer(
-    model=text_model,
-    args=training_args,
-    train_dataset=train_dataset,
-    data_collator=data_collator,
-)
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,  # False for causal LM (GPT-style), True for masked LM (BERT-style)
+    )
 
-# Train the model
-print("Starting LoRA training...")
-trainer.train()
+    train_dataset = prepare_text_dataset(cfg, tokenizer)
 
-# Save the LoRA adapter
-text_model.save_pretrained("./lora_adapter")
+    # Training arguments - adjusted for LoRA
+    training_args = TrainingArguments(
+        output_dir=cfg.output_dir,
+        per_device_train_batch_size=cfg.per_device_train_batch_size,
+        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
+        num_train_epochs=cfg.num_train_epochs,
+        learning_rate=cfg.learning_rate,
+        warmup_steps=cfg.warmup_steps,
+        logging_steps=cfg.logging_steps,
+        save_strategy=cfg.save_strategy,
+        eval_strategy=cfg.eval_strategy,
+        fp16=cfg.fp16,
+        dataloader_drop_last=cfg.dataloader_drop_last,
+        remove_unused_columns=cfg.remove_unused_columns,
+        report_to=cfg.report_to,
+    )
 
-print("Training complete!")
-print("After training:")
-print(generate_text("Once upon a time in a land far, far away,"))
+    # Create trainer
+    trainer = Trainer(
+        model=text_model,
+        args=training_args,
+        train_dataset=train_dataset,
+        data_collator=data_collator,
+    )
 
-# Optional: Merge LoRA weights back into the base model for inference
-# (This creates a single model file but loses the memory efficiency of LoRA)
-# merged_model = text_model.merge_and_unload()
-# merged_model.save_pretrained("./merged_model")
+    # Train the model
+    logger.info("Starting LoRA training...")
+    trainer.train()
+
+    # Save the LoRA adapter
+    text_model.save_pretrained(cfg.output_dir)
+
+    logger.info("Training complete!")
+    logger.info("After training:")
+    logger.info(generate_text("Once upon a time in a land far, far away,"))
+
+    # Merge LoRA weights back into the base model for inference
+    # (This creates a single model file but loses the memory efficiency of LoRA)
+    # merged_model = text_model.merge_and_unload()
+    # merged_model.save_pretrained("./merged_model")
+
+
+def main() -> None:
+    """main function"""
+    cfg = OmegaConf.structured(TrainConfig)
+    cli_cfg = OmegaConf.from_cli()
+    cfg = OmegaConf.merge(cfg, cli_cfg)
+    cfg = OmegaConf.to_container(cfg, resolve=True)
+    try:
+        cfg = TrainConfig(**cfg)
+    except TypeError as e:  # pylint: disable=broad-exception-raised
+        logger.error(f"Error: {e}\n\nUsage: python scratch.py")
+        sys.exit(1)
+
+    fooberino(cfg)
+
+
+if __name__ == "__main__":
+    main()
