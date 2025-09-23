@@ -212,4 +212,4 @@ demo = gr.ChatInterface(
 )
 
 
-demo.launch(debug=True, share=True, temp_dir="/scratch/s5982960/OCR-icelandic/temp")
+demo.launch(debug=True, share=True)
