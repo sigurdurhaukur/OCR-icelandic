@@ -1,7 +1,14 @@
+import os
 import re
 import time
 from threading import Thread
 
+# Set environment variable FIRST
+temp_dir = "/scratch/s5982960/OCR-icelandic/temp"
+os.environ["GRADIO_TEMP_DIR"] = temp_dir
+os.makedirs(temp_dir, exist_ok=True)
+
+# Then import gradio
 import gradio as gr
 import torch
 from PIL import Image
@@ -10,7 +17,7 @@ from transformers import AutoModelForVision2Seq, AutoProcessor, TextIteratorStre
 # import subprocess
 # subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
 
-print("Running on device:", torch.cuda.get_device_name(0))
+# print("Running on device:", torch.cuda.get_device_name(0))
 
 processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-Instruct")
 model = AutoModelForVision2Seq.from_pretrained(
@@ -205,4 +212,4 @@ demo = gr.ChatInterface(
 )
 
 
-demo.launch(debug=True, share=True)
+demo.launch(debug=True, share=True, temp_dir="/scratch/s5982960/OCR-icelandic/temp")
