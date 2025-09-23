@@ -12,7 +12,12 @@ os.makedirs(temp_dir, exist_ok=True)
 import gradio as gr
 import torch
 from PIL import Image
-from transformers import AutoModelForVision2Seq, AutoProcessor, TextIteratorStreamer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoModelForVision2Seq,
+    AutoProcessor,
+    TextIteratorStreamer,
+)
 
 # import subprocess
 # subprocess.run('pip install flash-attn --no-build-isolation', env={'FLASH_ATTENTION_SKIP_CUDA_BUILD': "TRUE"}, shell=True)
@@ -100,65 +105,10 @@ def model_inference(
         yield buffer
 
 
-examples = [
-    [
-        {
-            "text": "What art era do these artpieces belong to?",
-            "files": ["example_images/rococo.jpg", "example_images/rococo_1.jpg"],
-        },
-        "Greedy",
-        0.4,
-        512,
-        1.2,
-        0.8,
-    ],
-    [
-        {
-            "text": "I'm planning a visit to this temple, give me travel tips.",
-            "files": ["example_images/examples_wat_arun.jpg"],
-        },
-        "Greedy",
-        0.4,
-        512,
-        1.2,
-        0.8,
-    ],
-    [
-        {
-            "text": "What is the due date and the invoice date?",
-            "files": ["example_images/examples_invoice.png"],
-        },
-        "Greedy",
-        0.4,
-        512,
-        1.2,
-        0.8,
-    ],
-    [
-        {"text": "What is this UI about?", "files": ["example_images/s2w_example.png"]},
-        "Greedy",
-        0.4,
-        512,
-        1.2,
-        0.8,
-    ],
-    [
-        {
-            "text": "Where do the severe droughts happen according to this diagram?",
-            "files": ["example_images/examples_weather_events.png"],
-        },
-        "Greedy",
-        0.4,
-        512,
-        1.2,
-        0.8,
-    ],
-]
 demo = gr.ChatInterface(
     fn=model_inference,
     title="SmolVLM: Small yet Mighty 💫",
     description="Play with [HuggingFaceTB/SmolVLM-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-Instruct) in this demo. To get started, upload an image and text or try one of the examples. This checkpoint works best with single turn conversations, so clear the conversation after a single turn.",
-    examples=examples,
     textbox=gr.MultimodalTextbox(
         label="Query Input", file_types=["image"], file_count="multiple"
     ),
