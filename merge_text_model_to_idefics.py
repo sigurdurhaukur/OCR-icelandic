@@ -7,6 +7,7 @@ vision and multimodal components intact.
 """
 
 import logging
+
 import torch
 from transformers import (
     AutoModelForCausalLM,
@@ -262,10 +263,8 @@ def main():
         output_path,
         "Einu sinni var karl og kerling sem bjuggu í",
     )
-s
-    logger.info(
-        "All done! Our Idefics3 model now has Icelandic language capabilities."
-    )
+
+    logger.info("All done! Our Idefics3 model now has Icelandic language capabilities.")
 
 
 if __name__ == "__main__":
