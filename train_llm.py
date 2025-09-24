@@ -31,6 +31,7 @@ from transformers import (
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     Idefics3ForConditionalGeneration,
+    AutoProcessor,
     Trainer,
     TrainingArguments,
 )
@@ -203,6 +204,57 @@ def get_text_model_from_idefics3(
 
     return text_model
 
+def lora_merge_and_save_full_model(model, text_model, tokenizer, cfg):
+   # test lora merging and saving full model
+    lora_merged = text_model.merge_and_unload()
+
+    # Test the LoRA model BEFORE merging
+    test_input = tokenizer("Einu sinni var karl og kerling sem bjuggu í", return_tensors="pt").input_ids.to(DEVICE)
+    lora_output = text_model.generate(test_input, max_new_tokens=10, do_sample=False)
+    lora_decoded = tokenizer.decode(lora_output[0], skip_special_tokens=True)
+    print(f"LoRA text model: {lora_decoded}")
+
+    # Get the merged state dict and map it back to the original text model
+    merged_state_dict = lora_merged.state_dict()
+
+    text_model_state_dict = {}
+    lm_head_weight = None
+    for key, value in merged_state_dict.items():
+        if key == 'lm_head.weight':
+            lm_head_weight = value  # Store for later use
+        elif key.startswith('model.'):
+            new_key = key[6:]  # Remove 'model.' prefix
+            text_model_state_dict[new_key] = value
+        else:
+            text_model_state_dict[key] = value
+
+    # Load the weights back into the original text model structure
+    model.model.text_model.load_state_dict(text_model_state_dict)
+
+    if lm_head_weight is not None:
+        model.lm_head.weight.data = lm_head_weight.data
+
+
+    # save the full model with LoRA merged
+    model.save_pretrained("full_idefics3_lora_merged")
+
+    # load the merged model to verify it works
+    loaded_model = Idefics3ForConditionalGeneration.from_pretrained(
+        "full_idefics3_lora_merged",
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+    ).to(DEVICE)
+
+    # After loading the saved model, test it
+    loaded_output = loaded_model.generate(test_input, max_new_tokens=10, do_sample=False)
+    loaded_decoded = tokenizer.decode(loaded_output[0], skip_special_tokens=True)
+    print(f"Loaded model: {loaded_decoded}")
+
+        # Optionally push to Hugging Face Hub
+    if cfg.push_to_hub and cfg.hub_repo_id:
+        logger.info(f"Pushing model to the hub at {cfg.hub_repo_id}...")
+        model.push_to_hub(cfg.hub_repo_id)
+
 
 def fine_tune_text_model(cfg: TrainConfig) -> None:
     """
@@ -229,8 +281,11 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
     # Extract the text model (Llama)
     text_model = get_text_model_from_idefics3(model)
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_id)
+    # Load processor and tokenizer
+    processor = AutoProcessor.from_pretrained(
+        cfg.model_id
+    )
+    tokenizer = processor.tokenizer
 
     # Configure LoRA
     lora_config = LoraConfig(
@@ -255,6 +310,9 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
     # Apply LoRA to the model
     text_model = get_peft_model(text_model, lora_config)
 
+    # the base_model_name_or_path key in the config causes issues when loading later, so we need to update it
+    text_model.peft_config['default'].base_model_name_or_path = cfg.model_id
+
     # Move to device
     text_model.to(DEVICE)
 
@@ -263,6 +321,7 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
 
     # sanity check before training
     sanity_check(text_model, tokenizer)
+
 
     data_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
@@ -300,24 +359,19 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
     logger.info("Starting LoRA training...")
     trainer.train()
 
-    # Save the LoRA adapter
+    # this key in the config causes issues when loading later, so we need to update it
+    # "base_model_name_or_path": "/fsx/m4/experiments/local_experiment_dir/s3_async_temporary_checkpoint_folder/tr_324_opt_400/unwrapped_model",
+    # if "base_model_name_or_path" in text_model.config.__dict__:
+    #     text_model.config.__dict__.pop("base_model_name_or_path")
+    #     logger.info("Removed 'base_model_name_or_path' from model config.")
+
+    # Save the LoRA adapters
+    logger.info("Saving LoRA adapters...")
     text_model.save_pretrained(cfg.output_dir)
 
-    logger.info("Training complete!")
-    logger.info("After training:")
-    sanity_check(text_model, tokenizer)  # check if Icelandic generation works/improves
+    # merge and save the full model with LoRA weights
+    lora_merge_and_save_full_model(model, text_model, tokenizer, cfg)
 
-    # Merge LoRA weights back into the base model for inference
-    # (This creates a single model file but loses the memory efficiency of LoRA)
-    merged_model = text_model.merge_and_unload()
-    merged_model.save_pretrained("./merged_model")
-
-    # Optionally push to Hugging Face Hub
-    if cfg.push_to_hub and cfg.hub_repo_id:
-        logger.info(f"Pushing model to the hub at {cfg.hub_repo_id}...")
-        text_model.push_to_hub(cfg.hub_repo_id + "-lora")
-        logger.info("Model pushed to the hub successfully.")
-        text_model.push_to_hub(cfg.hub_repo_id)
 
 
 def main() -> None:
