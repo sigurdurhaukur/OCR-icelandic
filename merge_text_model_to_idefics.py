@@ -9,11 +9,7 @@ vision and multimodal components intact.
 import logging
 
 import torch
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    Idefics3ForConditionalGeneration,
-)
+from transformers import AutoModel, AutoTokenizer, Idefics3ForConditionalGeneration
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +23,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 def swap_language_model_in_idefics3(
     original_idefics_model_id: str,
-    fine_tuned_text_model_path: str,
+    fine_tuned_text_model_id: str,
     output_path: str = "./idefics3_with_icelandic_lm",
     push_to_hub: bool = False,
     hub_repo_id: str = None,
@@ -54,11 +50,11 @@ def swap_language_model_in_idefics3(
         torch_dtype=torch.bfloat16,
     )
 
-    logger.info(f"Loading our fine-tuned text model: {fine_tuned_text_model_path}")
+    logger.info(f"Loading our fine-tuned text model: {fine_tuned_text_model_id}")
 
     # Load our fine-tuned text model
-    fine_tuned_model = AutoModelForCausalLM.from_pretrained(
-        fine_tuned_text_model_path,
+    fine_tuned_model = AutoModel.from_pretrained(
+        fine_tuned_text_model_id,
         torch_dtype=torch.bfloat16,
     )
 
@@ -92,7 +88,7 @@ def swap_language_model_in_idefics3(
     # Load tokenizer (use the one from your fine-tuned model if it's different)
     try:
         # Try to load tokenizer from your fine-tuned model first
-        tokenizer = AutoTokenizer.from_pretrained(fine_tuned_text_model_path)
+        tokenizer = AutoTokenizer.from_pretrained(fine_tuned_text_model_id)
         logger.info("Using tokenizer from fine-tuned model")
     except:
         # Fall back to original tokenizer
@@ -248,7 +244,7 @@ def main():
     # Perform the swap
     modified_model = swap_language_model_in_idefics3(
         original_idefics_model_id=original_idefics_model_id,
-        fine_tuned_text_model_path=fine_tuned_text_model_path,
+        fine_tuned_text_model_id=fine_tuned_text_model_path,
         output_path=output_path,
         push_to_hub=push_to_hub,
         hub_repo_id=hub_repo_id,
