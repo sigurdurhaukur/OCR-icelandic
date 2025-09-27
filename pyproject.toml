@@ -15,6 +15,7 @@ dependencies = [
     "peft>=0.17.1",
     "wandb>=0.22.0",
     "gradio>=5.47.0",
+    "dataclasses>=0.8",
 ]
 
 [dependency-groups]
