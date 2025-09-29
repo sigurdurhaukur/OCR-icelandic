@@ -26,7 +26,7 @@ import peft
 import time
 
 import torch
-from datasets import load_dataset
+from datasets import load_dataset, Dataset
 from omegaconf import OmegaConf
 from peft import LoraConfig, TaskType, get_peft_model
 from transformers import (
@@ -56,8 +56,8 @@ class TrainConfig:
     # Dataset configuration
     hf_dataset_id: str = "arnastofnun/IGC-2024"  # Hugging Face dataset ID
     hf_data_directory: str = "wiki"  # Subdirectory within the dataset
-    dataset_split: str = "train[:95%]"  # Dataset split to use for training
-    eval_dataset_split: str = "train[95%:100%]"  # Dataset split to use for evaluation
+    # dataset_split: str = "train[:95%]"  # Dataset split to use for training
+    # eval_dataset_split: str = "train[95%:100%]"  # Dataset split to use for evaluation
     max_length: int = 512  # Max token length for text sequences
     max_entries: int = 0  # Max entries to process from dataset (for quick testing, 0 = all)
     max_eval_entries: int = 10  # Max entries to process from eval dataset (for quick testing, 0 = all)
@@ -256,50 +256,73 @@ def prepare_datasets(
         tuple: (train_dataset, eval_dataset) - Tokenized datasets ready for training.
     """
 
-    # Load and prepare datasets
-    logger.info(f"Loading dataset {cfg.hf_dataset_id}...")
+    ds = load_dataset(
+        cfg.hf_dataset_id,
+        cfg.hf_data_directory,
+    )
 
-    # Load training dataset
-    train_ds = load_dataset(cfg.hf_dataset_id, cfg.hf_data_directory, split=cfg.dataset_split)
+    logger.info(f"Dataset loaded: {ds}")
 
-    # Try to load evaluation dataset, fallback to using train split if validation doesn't exist
-    try:
-        eval_ds = load_dataset(cfg.hf_dataset_id, cfg.hf_data_directory, split=cfg.eval_dataset_split)
-        logger.info(f"Loaded evaluation dataset with split: {cfg.eval_dataset_split}")
-    except Exception as e:
-        logger.warning(f"Could not load evaluation split '{cfg.eval_dataset_split}': {e}")
-        logger.info("Using a subset of training data for evaluation")
-        # Use last 20% of training data for evaluation
-        train_size = int(0.8 * len(train_ds))
-        eval_size = len(train_ds) - train_size
-        train_ds, eval_ds = train_ds.train_test_split(
-            train_size=train_size,
-            test_size=eval_size,
-            seed=42
-        ).values()
+
+    # split and shuffle the dataset
+    train_ds, eval_ds = ds["train"].train_test_split(
+        test_size=0.2, seed=42
+    ).values()
+
+    eval_ds, test_ds = eval_ds.train_test_split(
+        test_size=0.5, seed=42
+    ).values()
+
+    # aim for 80% train, 10% eval, 10% test split (and at least 2k samples in each)
+    logger.info(f"Training dataset size: {len(train_ds)}")
+    logger.info(f"Evaluation dataset size: {len(eval_ds)}")
+    logger.info(f"Test dataset size: {len(test_ds)}")
+
+    # for now we will not use the test set, but it could be used for final evaluation after training
 
     # Tokenize dataset
     def tokenize_function(examples):
-        return tokenizer(
-            examples[cfg.text_key],
-            truncation=True,
-            padding="max_length",
-            max_length=cfg.max_length,
-        )
+        # Tokenize without truncation or padding to preserve all content
+        return tokenizer(examples[cfg.text_key], truncation=False, padding=False)
 
     logger.info("Tokenizing training dataset...")
     train_dataset = train_ds.map(
         tokenize_function,
         batched=True,
-        remove_columns=train_ds.column_names,  # Remove original columns to save memory
+        remove_columns=train_ds.column_names,
     )
 
     logger.info("Tokenizing evaluation dataset...")
     eval_dataset = eval_ds.map(
         tokenize_function,
         batched=True,
-        remove_columns=eval_ds.column_names,  # Remove original columns to save memory
+        remove_columns=eval_ds.column_names,
     )
+
+    # Add packing step: concatenate all input_ids and split into chunks
+    def pack_dataset(dataset):
+        # Concatenate all sequences
+        all_input_ids = []
+        for example in dataset:
+            all_input_ids.extend(example["input_ids"])
+            all_input_ids.append(tokenizer.eos_token_id)  # Add EOS token between examples
+
+        # Split into chunks of max_length
+        packed_input_ids = []
+        for i in range(0, len(all_input_ids), cfg.max_length):
+            chunk = all_input_ids[i : i + cfg.max_length]
+            if len(chunk) == cfg.max_length:  # Only keep full chunks
+                packed_input_ids.append(chunk)
+
+        # Convert to dataset format
+        return {"input_ids": packed_input_ids}
+
+    train_dataset = pack_dataset(train_dataset)
+    eval_dataset = pack_dataset(eval_dataset)
+
+    # Convert back to Dataset objects if needed (using datasets.Dataset.from_dict)
+    train_dataset = Dataset.from_dict(train_dataset)
+    eval_dataset = Dataset.from_dict(eval_dataset)
 
     # Limit dataset sizes if specified
     if cfg.max_entries > 0:

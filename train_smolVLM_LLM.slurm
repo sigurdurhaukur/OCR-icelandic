@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=4:00:00
+#SBATCH --time=2:00:00
 #SBATCH --job-name=smolVLM_lora_icelandic_v1
 #SBATCH --output=logs/smolVLM_lora_icelandic_v1-%j.log
 #SBATCH --error=logs/smolVLM_lora_icelandic_v1-%j.err
