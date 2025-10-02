@@ -29,6 +29,7 @@ class DataConfig:
     """Configuration for dataset creation"""
 
     dataset_path: str = "mideind/is_prototyping_corpus"
+    text_column: str = "text"  # Column in dataset containing text
     max_length: int = 512
     max_entries: int = 400
     image_width: int = 512
@@ -239,7 +240,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     # No text could be fitted, break to avoid infinite loop
                     break
 
-                new_data["text"].append(fitted_text)
+                new_data[cfg.text_column].append(fitted_text)
                 new_data["image"].append(image)
 
                 # Update remaining text
