@@ -30,6 +30,7 @@ class DataConfig:
 
     dataset_path: str = "mideind/is_prototyping_corpus"
     text_column: str = "text"  # Column in dataset containing text
+    data_directory: str = "igc"  # Subdirectory or config name in the dataset
     max_length: int = 512
     max_entries: int = 400
     image_width: int = 512
@@ -264,7 +265,7 @@ def create_image_dataset(cfg: DataConfig) -> None:
     # load dataset
     dataset = load_dataset(
         cfg.dataset_path,
-        "igc",
+        cfg.data_directory if hasattr(cfg, "data_directory") else None,
         split=f"train",
     )
 
