@@ -14,7 +14,7 @@ module load Python/3.13.1-GCCcore-14.2.0
 
 mkdir -p $SCRATCH
 
-RUN_NAME = "Generate Synthetic Data"
+RUN_NAME="Generate Synthetic Data"
 
 # Log system info
 echo "=== Job Information ==="
