@@ -273,7 +273,13 @@ def create_image_dataset(cfg: DataConfig) -> None:
     if cfg.max_entries > 0:
         dataset = dataset.select(range(cfg.max_entries))
 
-    texts = dataset["text"]
+    texts = dataset[cfg.text_column]
+
+    # rename text column to 'text' if necessary
+    if cfg.text_column != "text":
+        logger.info(f"Renaming text column '{cfg.text_column}' to 'text'")
+        dataset = dataset.rename_column(cfg.text_column, "text")
+        cfg.text_column = "text"
 
     # Create a new dataset with an 'image' column for each text
     image_dataset = generate_image_dataset(texts, cfg)
