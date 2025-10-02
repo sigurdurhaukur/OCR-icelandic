@@ -10,7 +10,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from datasets import Dataset, Image, load_dataset
+from datasets import Dataset, DatasetDict, Image, load_dataset
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
@@ -31,8 +31,10 @@ class DataConfig:
     dataset_path: str = "mideind/is_prototyping_corpus"
     text_column: str = "text"  # Column in dataset containing text
     data_directory: str = "igc"  # Subdirectory or config name in the dataset
+    split: str = "train"  # Which split to use from the dataset
     max_length: int = 512
     max_entries: int = 400
+    show_sample: bool = False  # Whether to show a sample image after creation
     image_width: int = 512
     image_height: int = 512
     image_dpi: int = 72
@@ -204,7 +206,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     if cfg.num_examples:
         texts = texts[: cfg.num_examples]
 
-    print("Generating images from text...")
+    logger.info("Generating images from text...")
     total_splits = 0
     for text in tqdm(texts, desc="Processing text", unit="text"):
         # Split long texts first
@@ -256,6 +258,14 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     return image_dataset
 
 
+def display_sample(dataset: dict) -> None:
+    logger.info("\nShowing first generated image...")
+    if len(dataset["train"]) > 0:
+        logger.info("Text for first image:")
+        logger.info(f"'{dataset['train'][0]['text']}'")
+        dataset["train"][0]["image"].show()
+
+
 def create_image_dataset(cfg: DataConfig) -> None:
     """
     Create a dataset with images generated from text data.
@@ -266,7 +276,7 @@ def create_image_dataset(cfg: DataConfig) -> None:
     dataset = load_dataset(
         cfg.dataset_path,
         cfg.data_directory if hasattr(cfg, "data_directory") else None,
-        split=f"train",
+        split=cfg.split,
     )
 
     # select number of entries if specified
@@ -284,8 +294,8 @@ def create_image_dataset(cfg: DataConfig) -> None:
     # Create a new dataset with an 'image' column for each text
     image_dataset = generate_image_dataset(texts, cfg)
 
-    print(f"\nOriginal dataset size: {len(texts)}")
-    print(f"New image dataset size: {len(image_dataset)}")
+    logger.info(f"\nOriginal dataset size: {len(texts)}")
+    logger.info(f"New image dataset size: {len(image_dataset)}")
 
     # Create a train/test/validation split (80/10/10)
     split_dataset = image_dataset.train_test_split(test_size=0.2, seed=42)
@@ -299,24 +309,20 @@ def create_image_dataset(cfg: DataConfig) -> None:
     # Save the new dataset
     output_path = cfg.output_path
     # Use DatasetDict for saving splits
-    from datasets import DatasetDict
 
     dataset_dict = DatasetDict(final_dataset)
     dataset_dict.save_to_disk(output_path)
-    print(f"Image dataset saved to {output_path}")
+    logger.info(f"Image dataset saved to {output_path}")
 
     # Display the first image as an example
-    print("\nShowing first generated image...")
-    if len(final_dataset["train"]) > 0:
-        print("Text for first image:")
-        print(f"'{final_dataset['train'][0]['text']}'")
-        final_dataset["train"][0]["image"].show()
+    if cfg.show_sample:
+        display_sample(final_dataset)
 
     # upload to huggingface dataset hub
     if cfg.push_to_hub and cfg.hub_repo_id:
-        print(f"Pushing dataset to the hub at {cfg.hub_repo_id}...")
+        logger.info(f"Pushing dataset to the hub at {cfg.hub_repo_id}...")
         dataset_dict.push_to_hub(cfg.hub_repo_id)
-        print("Dataset pushed to the hub successfully.")
+        logger.info("Dataset pushed to the hub successfully.")
 
 
 def main() -> None:
