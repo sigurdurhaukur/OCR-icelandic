@@ -6,6 +6,7 @@ merged_model
 results
 lora_results
 .gradio
+logs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
