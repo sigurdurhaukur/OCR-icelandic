@@ -11,7 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from datasets import Dataset, DatasetDict, Image, load_dataset
+from fontTools.ttLib import TTFont
 from omegaconf import OmegaConf
+from pyfonts import load_google_font
 from tqdm import tqdm
 
 from utils import create_image_with_text
@@ -42,10 +44,11 @@ class DataConfig:
     font_path: str = "/System/Library/Fonts/Supplemental/Arial.ttf"
     font_size: int = 12
     font_color: str = "black"
+    use_random_font_colors: bool = True  # Whether to use random font colors
     text_vertical_alignment: str = "center"  # top, middle, bottom
     text_horizontal_alignment: str = "left"  # left, center, right
     output_path: str = "isl_synthetic_ocr_output"  # Directory to save dataset
-    num_examples: int = 1000  # Number of examples to generate
+    num_examples: int = 0  # Number of examples to generate
     push_to_hub: bool = False  # Whether to push dataset to Hugging Face Hub
     hub_repo_id: str = (
         "Sigurdur/isl_synthetic_ocr"  # Hugging Face repo ID to push dataset
@@ -55,113 +58,13 @@ class DataConfig:
     max_text_length: int = 2000  # Maximum characters per text before splitting
 
 
-def get_icelandic_compatible_fonts():
-    """Get a curated list of fonts known to support Icelandic characters."""
-    # Curated list of fonts that support Latin Extended-A (includes Icelandic)
-    font_names = [
-        # macOS system fonts
-        "Arial.ttf",
-        "Arial Bold.ttf",
-        "Arial Italic.ttf",
-        "Helvetica.ttc",
-        "Times New Roman.ttf",
-        "Times New Roman Bold.ttf",
-        "Courier New.ttf",
-        "Courier New Bold.ttf",
-        "Georgia.ttf",
-        "Georgia Bold.ttf",
-        "Verdana.ttf",
-        "Verdana Bold.ttf",
-        "Trebuchet MS.ttf",
-        "Trebuchet MS Bold.ttf",
-        "Comic Sans MS.ttf",
-        "Impact.ttf",
-        "Tahoma.ttf",
-        "Tahoma Bold.ttf",
-        # Apple system fonts
-        "SF-Pro-Display-Regular.otf",
-        "SF-Pro-Display-Bold.otf",
-        "SF-Pro-Text-Regular.otf",
-        "SF-Pro-Text-Bold.otf",
-        # Additional macOS fonts
-        "Palatino.ttc",
-        "Futura.ttc",
-        "Optima.ttc",
-        "Baskerville.ttc",
-        "Didot.ttc",
-        "Avenir.ttc",
-        "Avenir Next.ttc",
-        # Ubuntu/Linux fonts
-        "DejaVuSans.ttf",
-        "DejaVuSans-Bold.ttf",
-        "DejaVuSerif.ttf",
-        "DejaVuSerif-Bold.ttf",
-        "LiberationSans-Regular.ttf",
-        "LiberationSans-Bold.ttf",
-        "LiberationSerif-Regular.ttf",
-        "LiberationSerif-Bold.ttf",
-        "FreeSans.ttf",
-        "FreeSansBold.ttf",
-        "FreeSerif.ttf",
-        "FreeSerifBold.ttf",
-        "NotoSans-Regular.ttf",
-        "NotoSans-Bold.ttf",
-        "NotoSerif-Regular.ttf",
-        "NotoSerif-Bold.ttf",
-    ]
-
-    # Platform-specific font directories
-    font_directories = [
-        # macOS paths
-        "/System/Library/Fonts",
-        "/System/Library/Fonts/Supplemental",
-        "/Library/Fonts",
-        # Ubuntu/Linux paths
-        "/usr/share/fonts/truetype/dejavu",
-        "/usr/share/fonts/truetype/liberation",
-        "/usr/share/fonts/truetype/liberation2",
-        "/usr/share/fonts/truetype/freefont",
-        "/usr/share/fonts/truetype/noto",
-        "/usr/share/fonts/opentype/noto",
-        # User fonts (both platforms)
-        str(Path.home() / ".fonts"),
-        str(Path.home() / ".local/share/fonts"),
-    ]
-
-    available_fonts = []
-
-    for font_name in font_names:
-        for font_dir in font_directories:
-            font_path = Path(font_dir) / font_name
-            if font_path.exists():
-                available_fonts.append(str(font_path))
-                break  # Found the font, no need to check other directories
-
-    if not available_fonts:
-        logger.warning("No Icelandic-compatible fonts found in standard locations")
-        logger.info(f"Searched directories: {font_directories}")
-    else:
-        logger.info(f"Found {len(available_fonts)} Icelandic-compatible fonts")
-        logger.debug(f"Available fonts: {available_fonts[:5]}...")  # Log first 5
-
-    return available_fonts
-
-
 def get_random_background_color():
     """Generate a random brown/beige/white background color."""
-    color_palettes = [
-        # Whites
-        [(250, 250, 250), (255, 255, 255), (248, 248, 248), (245, 245, 245)],
-        # Beiges
-        [(245, 245, 220), (255, 248, 220), (250, 235, 215), (255, 239, 213)],
-        # Light browns
-        [(222, 184, 135), (210, 180, 140), (188, 143, 143), (205, 175, 149)],
-        # Creams
-        [(255, 253, 208), (255, 250, 205), (253, 245, 230), (250, 240, 230)],
-    ]
-
-    palette = random.choice(color_palettes)
-    return random.choice(palette)
+    # generate random brown/beige/white color
+    r = random.randint(200, 255)
+    g = random.randint(180, 255)
+    b = random.randint(150, 255)
+    return (r, g, b)
 
 
 def split_long_text(text: str, max_length: int) -> list[str]:
@@ -205,6 +108,64 @@ def split_long_text(text: str, max_length: int) -> list[str]:
     return chunks
 
 
+def check_font_supports_char(fontpath, unicode_char):
+    font = TTFont(fontpath)  # specify the path to the font in question
+
+    for cmap in font["cmap"].tables:
+        if cmap.isUnicode():
+            if ord(unicode_char) in cmap.cmap:
+                return True
+    return False
+
+
+def get_icelandic_compatible_fonts():
+    # load fonts from font directory
+
+    random.seed(42)  # For reproducibility
+
+    # Check common font directories based on OS
+    current_os = sys.platform
+
+    font_dirs = []
+
+    # macos
+    if current_os.startswith("darwin"):
+        font_dirs = [
+            "/System/Library/Fonts",
+            "/System/Library/Fonts/Supplemental",
+        ]
+    # linux
+    if current_os.startswith("linux"):
+        font_dirs += [
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+        ]
+    # windows
+    if current_os.startswith("win"):
+        font_dirs += [
+            str(Path.home() / "AppData/Local/Microsoft/Windows/Fonts"),
+            str(Path.home() / "AppData/Roaming/Microsoft/Windows/Fonts"),
+            "C:/Windows/Fonts",
+        ]
+
+    logger.info(f"Searching for fonts in directories: {font_dirs}")
+
+    available_fonts = []
+    characters_to_check = "ÁáÐðÉéÍíÓóÚúÝýÞþÆæÖö"
+    for font_dir in tqdm(font_dirs, desc="Scanning font directories"):
+        font_path = Path(font_dir)
+        if font_path.exists() and font_path.is_dir():
+            for font_file in font_path.rglob("*.[tT][tT][fF]"):
+                for char in characters_to_check:
+                    if check_font_supports_char(font_file, char):
+                        available_fonts.append(str(font_file))
+                        break  # No need to check other characters for this font
+
+    logger.info(f"Found {len(available_fonts)} Icelandic-compatible fonts.")
+
+    return available_fonts
+
+
 def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     """
     Generates a new dataset with images and corresponding text,
@@ -215,7 +176,19 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     Returns:
         Dataset: A Hugging Face Dataset with 'text' and 'image' columns
     """
-    new_data: dict[str, list] = {"text": [], "image": []}
+    new_data: dict[str, list] = {
+        "text": [],
+        "image": [],
+        "font_path": [],
+        "bg_color": [],
+        "font_color": [],
+        "font_size": [],
+        "image_width": [],
+        "image_height": [],
+        "image_dpi": [],
+        "text_vertical_alignment": [],
+        "text_horizontal_alignment": [],
+    }
 
     # Get settings from config
     width = cfg.image_width
@@ -228,18 +201,16 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     font_color = cfg.font_color
     vertical_alignment = cfg.text_vertical_alignment
 
-    # Get available fonts if random fonts are enabled
     available_fonts = None
     if cfg.use_random_fonts:
         available_fonts = get_icelandic_compatible_fonts()
-        if not available_fonts:
-            logger.warning("No Icelandic-compatible fonts found. Using default font.")
-            available_fonts = None
-        else:
-            logger.info(f"Found {len(available_fonts)} Icelandic-compatible fonts")
 
+    if cfg.use_random_font_colors:
+        font_color = random.choice(
+            ["black", "darkblue", "darkred", "darkgreen", "brown"]
+        )
     # fix number of examples to generate if specified
-    if cfg.num_examples:
+    if cfg.num_examples > 0:
         texts = texts[: cfg.num_examples]
 
     logger.info("Generating images from text...")
@@ -281,6 +252,15 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
 
                 new_data[cfg.text_column].append(fitted_text)
                 new_data["image"].append(image)
+                new_data["font_path"].append(current_font_path)
+                new_data["bg_color"].append(current_bg_color)
+                new_data["font_color"].append(font_color)
+                new_data["font_size"].append(font_size)
+                new_data["image_width"].append(width)
+                new_data["image_height"].append(height)
+                new_data["image_dpi"].append(dpi)
+                new_data["text_vertical_alignment"].append(vertical_alignment)
+                new_data["text_horizontal_alignment"].append(alignment)
 
                 # Update remaining text
                 # This assumes create_image_with_text preserves original whitespace

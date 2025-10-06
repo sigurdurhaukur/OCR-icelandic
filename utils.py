@@ -237,15 +237,15 @@ def create_image_with_text(
     image = Image.new("RGB", scaled_image_size, color=bg_color)
     image.info["dpi"] = (dpi, dpi)
     draw = ImageDraw.Draw(image)
-    font = load_font(font=font_path, font_size=scaled_font_size)
+    font_path = load_font(font=font_path, font_size=scaled_font_size)
 
     max_text_width = int(scaled_image_size[0] * max_width_ratio)
     margin_x = (scaled_image_size[0] - max_text_width) // 2
 
-    lines = wrap_text(draw, text, font, max_text_width, tab_width)
+    lines = wrap_text(draw, text, font_path, max_text_width, tab_width)
 
     start_y, effective_line_height, fitted_lines = get_text_drawing_details(
-        draw, lines, scaled_image_size, font, vertical_alignment=vertical_alignment
+        draw, lines, scaled_image_size, font_path, vertical_alignment=vertical_alignment
     )
 
     draw_text_lines(
@@ -253,7 +253,7 @@ def create_image_with_text(
         fitted_lines,
         start_y,
         effective_line_height,
-        font,
+        font_path,
         scaled_image_size,
         alignment,
         margin_x,
