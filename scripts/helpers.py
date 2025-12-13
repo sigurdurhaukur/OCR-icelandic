@@ -99,6 +99,72 @@ class TrainConfig:
     training: HFTrainingConfig = field(default_factory=HFTrainingConfig)
     wandb: WandBConfig = field(default_factory=WandBConfig)
 
+    @staticmethod
+    def from_flat_dict(flat_config: dict) -> "TrainConfig":
+        """
+        Convert flat CLI arguments to nested config structure.
+        Supports both flat keys (e.g., 'model_id') and nested keys (e.g., 'model.model_id').
+        """
+        # Define mapping from flat keys to nested paths
+        flat_to_nested = {
+            # Dataset fields
+            "hf_dataset_id": ("dataset", "hf_dataset_id"),
+            "hf_data_directory": ("dataset", "hf_data_directory"),
+            "max_length": ("dataset", "max_length"),
+            "max_entries": ("dataset", "max_entries"),
+            "max_eval_entries": ("dataset", "max_eval_entries"),
+            "text_key": ("dataset", "text_key"),
+            # Model fields
+            "model_id": ("model", "model_id"),
+            "push_to_hub": ("model", "push_to_hub"),
+            "hub_repo_id": ("model", "hub_repo_id"),
+            # LoRA fields
+            "lora_r": ("lora", "lora_r"),
+            "lora_alpha": ("lora", "lora_alpha"),
+            "lora_dropout": ("lora", "lora_dropout"),
+            # Training fields
+            "output_dir": ("training", "output_dir"),
+            "num_train_epochs": ("training", "num_train_epochs"),
+            "per_device_train_batch_size": ("training", "per_device_train_batch_size"),
+            "per_device_eval_batch_size": ("training", "per_device_eval_batch_size"),
+            "gradient_accumulation_steps": ("training", "gradient_accumulation_steps"),
+            "learning_rate": ("training", "learning_rate"),
+            "warmup_steps": ("training", "warmup_steps"),
+            "logging_steps": ("training", "logging_steps"),
+            "eval_steps": ("training", "eval_steps"),
+            "save_strategy": ("training", "save_strategy"),
+            "save_steps": ("training", "save_steps"),
+            "save_total_limit": ("training", "save_total_limit"),
+            "load_best_model_at_end": ("training", "load_best_model_at_end"),
+            "eval_strategy": ("training", "eval_strategy"),
+            "fp16": ("training", "fp16"),
+            "dataloader_drop_last": ("training", "dataloader_drop_last"),
+            "remove_unused_columns": ("training", "remove_unused_columns"),
+            "metric_for_best_model": ("training", "metric_for_best_model"),
+            "greater_is_better": ("training", "greater_is_better"),
+            "report_to": ("training", "report_to"),
+            # WandB fields
+            "entity": ("wandb", "entity"),
+            "project": ("wandb", "project"),
+            "run_name": ("wandb", "run_name"),
+            "run_description": ("wandb", "run_description"),
+            "tags": ("wandb", "tags"),
+        }
+
+        # Build nested structure
+        nested_config = {}
+        for key, value in flat_config.items():
+            if key in flat_to_nested:
+                section, field_name = flat_to_nested[key]
+                if section not in nested_config:
+                    nested_config[section] = {}
+                nested_config[section][field_name] = value
+            else:
+                # Already nested or unknown key - keep as is
+                nested_config[key] = value
+
+        return nested_config
+
     # Legacy compatibility - expose commonly used fields at top level
     @property
     def model_id(self) -> str:

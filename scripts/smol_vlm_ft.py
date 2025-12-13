@@ -318,8 +318,15 @@ def main() -> None:
     """main function"""
     cfg = OmegaConf.structured(TrainConfig)
     cli_cfg = OmegaConf.from_cli()
-    cfg = OmegaConf.merge(cfg, cli_cfg)
+
+    # Convert flat CLI args to nested structure
+    cli_dict = OmegaConf.to_container(cli_cfg, resolve=True)
+    nested_cli = TrainConfig.from_flat_dict(cli_dict)
+
+    # Merge with default config
+    cfg = OmegaConf.merge(cfg, nested_cli)
     cfg = OmegaConf.to_container(cfg, resolve=True)
+
     try:
         cfg = TrainConfig(**cfg)
     except TypeError as e:  # pylint: disable=broad-exception-raised
