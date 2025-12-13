@@ -416,9 +416,9 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
     lora_config = LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,
-        r=cfg.lora_r,  # Rank of adaptation - higher values = more parameters but potentially better performance
-        lora_alpha=cfg.lora_alpha,  # LoRA scaling parameter - typically 2x the rank
-        lora_dropout=cfg.lora_dropout,  # Dropout for LoRA layers
+        r=cfg.lora.lora_r,
+        lora_alpha=cfg.lora.lora_alpha,
+        lora_dropout=cfg.lora.lora_dropout,
         target_modules=[
             "q_proj",  # Query projection
             "k_proj",  # Key projection
@@ -457,33 +457,28 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
 
     # Initialize wandb
     run = wandb.init(
-        # Set the wandb entity where your project will be logged (generally your team name).
-        entity=cfg.entity,
-        # Set the wandb project where this run will be logged.
-        project=cfg.project,
-        # Track hyperparameters and run metadata.
+        entity=cfg.wandb.entity,
+        project=cfg.wandb.project,
         config={
-            "learning_rate": cfg.learning_rate,
-            "batch_size": cfg.per_device_train_batch_size,
-            "eval_batch_size": cfg.per_device_eval_batch_size,
-            "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
-            "num_train_epochs": cfg.num_train_epochs,
-            "lora_r": cfg.lora_r,
-            "lora_alpha": cfg.lora_alpha,
-            "lora_dropout": cfg.lora_dropout,
-            "model_id": cfg.model_id,
-            "hf_dataset_id": cfg.hf_dataset_id,
-            "hf_data_directory": cfg.hf_data_directory,
-            # "dataset_split": cfg.dataset_split,
-            # "eval_dataset_split": cfg.eval_dataset_split,
-            "max_length": cfg.max_length,
-            "max_entries": cfg.max_entries,
-            "max_eval_entries": cfg.max_eval_entries,
-            "push_to_hub": cfg.push_to_hub,
-            "hub_repo_id": cfg.hub_repo_id,
-            "fp16": cfg.fp16,
-            "eval_steps": cfg.eval_steps,
-            "eval_strategy": cfg.eval_strategy,
+            "learning_rate": cfg.training.learning_rate,
+            "batch_size": cfg.training.per_device_train_batch_size,
+            "eval_batch_size": cfg.training.per_device_eval_batch_size,
+            "gradient_accumulation_steps": cfg.training.gradient_accumulation_steps,
+            "num_train_epochs": cfg.training.num_train_epochs,
+            "lora_r": cfg.lora.lora_r,
+            "lora_alpha": cfg.lora.lora_alpha,
+            "lora_dropout": cfg.lora.lora_dropout,
+            "model_id": cfg.model.model_id,
+            "hf_dataset_id": cfg.dataset.hf_dataset_id,
+            "hf_data_directory": cfg.dataset.hf_data_directory,
+            "max_length": cfg.dataset.max_length,
+            "max_entries": cfg.dataset.max_entries,
+            "max_eval_entries": cfg.dataset.max_eval_entries,
+            "push_to_hub": cfg.model.push_to_hub,
+            "hub_repo_id": cfg.model.hub_repo_id,
+            "fp16": cfg.training.fp16,
+            "eval_steps": cfg.training.eval_steps,
+            "eval_strategy": cfg.training.eval_strategy,
             # Hardware info
             "device": DEVICE,
             "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
@@ -493,11 +488,14 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
             # Dataset info
             "total_train_dataset_size": len(train_dataset),
             "total_eval_dataset_size": len(eval_dataset),
-            "effective_batch_size": cfg.per_device_train_batch_size
-            * cfg.gradient_accumulation_steps,
+            "effective_batch_size": cfg.training.per_device_train_batch_size
+            * cfg.training.gradient_accumulation_steps,
             "total_training_steps": len(train_dataset)
-            // (cfg.per_device_train_batch_size * cfg.gradient_accumulation_steps)
-            * cfg.num_train_epochs,
+            // (
+                cfg.training.per_device_train_batch_size
+                * cfg.training.gradient_accumulation_steps
+            )
+            * cfg.training.num_train_epochs,
             # Model architecture
             "model_size": sum(p.numel() for p in text_model.parameters()),
             "trainable_params": sum(
@@ -512,29 +510,8 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
         },
     )
 
-    # Training arguments - adjusted for LoRA with evaluation
-    training_args = TrainingArguments(
-        output_dir=cfg.output_dir,
-        per_device_train_batch_size=cfg.per_device_train_batch_size,
-        per_device_eval_batch_size=cfg.per_device_eval_batch_size,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-        num_train_epochs=cfg.num_train_epochs,
-        learning_rate=cfg.learning_rate,
-        warmup_steps=cfg.warmup_steps,
-        logging_steps=cfg.logging_steps,
-        eval_steps=cfg.eval_steps,
-        save_strategy=cfg.save_strategy,
-        eval_strategy=cfg.eval_strategy,
-        save_steps=cfg.save_steps,
-        save_total_limit=cfg.save_total_limit,
-        fp16=cfg.fp16,
-        dataloader_drop_last=cfg.dataloader_drop_last,
-        remove_unused_columns=cfg.remove_unused_columns,
-        report_to=cfg.report_to,
-        load_best_model_at_end=cfg.load_best_model_at_end,
-        metric_for_best_model=cfg.metric_for_best_model,
-        greater_is_better=cfg.greater_is_better,
-    )
+    # Use the new config structure to create TrainingArguments cleanly
+    training_args = cfg.training.to_training_args()
 
     # Create callbacks
     token_callback = TokenCountCallback(max_length=cfg.max_length, tokenizer=tokenizer)
