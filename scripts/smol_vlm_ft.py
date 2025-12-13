@@ -50,9 +50,9 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
 
     if USE_QLORA or USE_LORA:
         lora_config = LoraConfig(
-            r=8,
-            lora_alpha=8,
-            lora_dropout=0.1,
+            r=cfg.lora.lora_r,
+            lora_alpha=cfg.lora.lora_alpha,
+            lora_dropout=cfg.lora.lora_dropout,
             target_modules=[
                 "down_proj",
                 "o_proj",
@@ -237,33 +237,28 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
 
     # Initialize wandb
     run = wandb.init(
-        # Set the wandb entity where your project will be logged (generally your team name).
-        entity=cfg.entity,
-        # Set the wandb project where this run will be logged.
-        project=cfg.project,
-        # Track hyperparameters and run metadata.
+        entity=cfg.wandb.entity,
+        project=cfg.wandb.project,
         config={
-            "learning_rate": cfg.learning_rate,
-            "batch_size": cfg.per_device_train_batch_size,
-            "eval_batch_size": cfg.per_device_eval_batch_size,
-            "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
-            "num_train_epochs": cfg.num_train_epochs,
-            "lora_r": cfg.lora_r,
-            "lora_alpha": cfg.lora_alpha,
-            "lora_dropout": cfg.lora_dropout,
-            "model_id": cfg.model_id,
-            "hf_dataset_id": cfg.hf_dataset_id,
-            "hf_data_directory": cfg.hf_data_directory,
-            # "dataset_split": cfg.dataset_split,
-            # "eval_dataset_split": cfg.eval_dataset_split,
-            "max_length": cfg.max_length,
-            "max_entries": cfg.max_entries,
-            "max_eval_entries": cfg.max_eval_entries,
-            "push_to_hub": cfg.push_to_hub,
-            "hub_repo_id": cfg.hub_repo_id,
-            "fp16": cfg.fp16,
-            "eval_steps": cfg.eval_steps,
-            "eval_strategy": cfg.eval_strategy,
+            "learning_rate": cfg.training.learning_rate,
+            "batch_size": cfg.training.per_device_train_batch_size,
+            "eval_batch_size": cfg.training.per_device_eval_batch_size,
+            "gradient_accumulation_steps": cfg.training.gradient_accumulation_steps,
+            "num_train_epochs": cfg.training.num_train_epochs,
+            "lora_r": cfg.lora.lora_r,
+            "lora_alpha": cfg.lora.lora_alpha,
+            "lora_dropout": cfg.lora.lora_dropout,
+            "model_id": cfg.model.model_id,
+            "hf_dataset_id": cfg.dataset.hf_dataset_id,
+            "hf_data_directory": cfg.dataset.hf_data_directory,
+            "max_length": cfg.dataset.max_length,
+            "max_entries": cfg.dataset.max_entries,
+            "max_eval_entries": cfg.dataset.max_eval_entries,
+            "push_to_hub": cfg.model.push_to_hub,
+            "hub_repo_id": cfg.model.hub_repo_id,
+            "fp16": cfg.training.fp16,
+            "eval_steps": cfg.training.eval_steps,
+            "eval_strategy": cfg.training.eval_strategy,
             # Hardware info
             "device": DEVICE,
             "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
@@ -273,11 +268,14 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
             # Dataset info
             "total_train_dataset_size": len(train_ds),
             "total_eval_dataset_size": len(validation_ds),
-            "effective_batch_size": cfg.per_device_train_batch_size
-            * cfg.gradient_accumulation_steps,
+            "effective_batch_size": cfg.training.per_device_train_batch_size
+            * cfg.training.gradient_accumulation_steps,
             "total_training_steps": len(train_ds)
-            // (cfg.per_device_train_batch_size * cfg.gradient_accumulation_steps)
-            * cfg.num_train_epochs,
+            // (
+                cfg.training.per_device_train_batch_size
+                * cfg.training.gradient_accumulation_steps
+            )
+            * cfg.training.num_train_epochs,
             # Model architecture
             "model_size": sum(p.numel() for p in model.parameters()),
             "trainable_params": sum(
@@ -292,25 +290,14 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         },
     )
 
-    training_args = TrainingArguments(
+    # Use the new config structure to create TrainingArguments cleanly
+    training_args = cfg.training.to_training_args(
         output_dir=f"./{model_id.split('/')[-1]}-ocr-isl-with-isl-bacbone",
         hub_model_id=f"{model_id.split('/')[-1]}-ocr-isl-with-isl-backbone",
-        num_train_epochs=cfg.num_train_epochs,
-        per_device_train_batch_size=cfg.per_device_train_batch_size,
-        per_device_eval_batch_size=cfg.per_device_eval_batch_size,
-        gradient_accumulation_steps=cfg.gradient_accumulation_steps,
-        warmup_steps=cfg.warmup_steps,
-        learning_rate=cfg.learning_rate,
         weight_decay=0.01,
-        logging_steps=cfg.logging_steps,
-        save_strategy=cfg.save_strategy,
-        save_steps=cfg.save_steps,
-        save_total_limit=cfg.save_total_limit,
-        eval_strategy=cfg.eval_strategy,
-        eval_steps=cfg.eval_steps,
         optim="paged_adamw_8bit",
-        bf16=cfg.fp16,
-        report_to=cfg.report_to,
+        bf16=cfg.training.bf16,
+        fp16=cfg.training.fp16,
         remove_unused_columns=False,
         gradient_checkpointing=True,
         max_grad_norm=1.0,
@@ -333,12 +320,19 @@ def main() -> None:
     """main function"""
     cfg = OmegaConf.structured(TrainConfig)
     cli_cfg = OmegaConf.from_cli()
-    cfg = OmegaConf.merge(cfg, cli_cfg)
+
+    # Convert flat CLI args to nested structure
+    cli_dict = OmegaConf.to_container(cli_cfg, resolve=True)
+    nested_cli = TrainConfig.from_flat_dict(cli_dict)
+
+    # Merge with default config
+    cfg = OmegaConf.merge(cfg, nested_cli)
     cfg = OmegaConf.to_container(cfg, resolve=True)
+
     try:
         cfg = TrainConfig(**cfg)
     except TypeError as e:  # pylint: disable=broad-exception-raised
-        logger.error(f"Error: {e}\n\nUsage: python scratch.py")
+        logger.error("Error: %s\n\nUsage: python smol_vlm_ft.py", e)
         sys.exit(1)
 
     fintune_smolvlm_ocr(cfg)
