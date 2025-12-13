@@ -6,7 +6,6 @@ import numpy as np
 import peft
 import torch
 import transformers
-import wandb
 from datasets import load_dataset
 from helpers import TrainConfig
 from Levenshtein import distance as lev_distance
@@ -19,6 +18,8 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
+import wandb
 
 logging.basicConfig(
     level=logging.INFO,
@@ -295,7 +296,8 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         hub_model_id=f"{model_id.split('/')[-1]}-ocr-isl-with-isl-backbone",
         weight_decay=0.01,
         optim="paged_adamw_8bit",
-        bf16=cfg.training.fp16,
+        bf16=cfg.training.bf16,
+        fp16=cfg.training.fp16,
         remove_unused_columns=False,
         gradient_checkpointing=True,
         max_grad_norm=1.0,
