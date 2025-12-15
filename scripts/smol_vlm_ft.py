@@ -6,6 +6,7 @@ import numpy as np
 import peft
 import torch
 import transformers
+import wandb
 from datasets import load_dataset
 from helpers import TrainConfig
 from Levenshtein import distance as lev_distance
@@ -18,8 +19,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-
-import wandb
 
 logging.basicConfig(
     level=logging.INFO,
@@ -100,7 +99,11 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
     ds = load_dataset(cfg.hf_dataset_id, trust_remote_code=True)
 
     # blacklist bad fonts
-    font_blacklist = ["AppleGothic.ttf", "Bodoni Ornaments.ttf"]
+    font_blacklist = [
+        "AppleGothic.ttf",
+        "Bodoni Ornaments.ttf",
+        "Bodoni 72 Smallcaps Book.ttf",
+    ]
 
     def filter_bad_fonts(example):
         return not any(bad_font in example["image_path"] for bad_font in font_blacklist)
