@@ -98,6 +98,15 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
 
     ds = load_dataset(cfg.hf_dataset_id, trust_remote_code=True)
 
+    # blacklist bad fonts
+    font_blacklist = ["AppleGothic.ttf", "Bodoni Ornaments.ttf"]
+
+    def filter_bad_fonts(example):
+        return not any(bad_font in example["image_path"] for bad_font in font_blacklist)
+
+    # filter the dataset to remove bad fonts
+    ds = ds.filter(filter_bad_fonts)
+
     train_ds = ds["train"]
     # validation_ds = ds["validation"]
     validation_ds = ds["validation"].select(range(min(5, len(ds["validation"]))))
