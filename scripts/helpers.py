@@ -44,6 +44,7 @@ class HFTrainingConfig:
     per_device_eval_batch_size: int = 8
     gradient_accumulation_steps: int = 4
     learning_rate: float = 1e-4
+    lr_scheduler_type: str = "cosine"
     warmup_steps: int = 100
     logging_steps: int = 50
     eval_steps: int = 200
@@ -52,7 +53,8 @@ class HFTrainingConfig:
     save_total_limit: int = 3
     load_best_model_at_end: bool = True
     eval_strategy: str = "steps"
-    fp16: bool = True
+    fp16: bool = False
+    bf16: bool = True
     dataloader_drop_last: bool = True
     remove_unused_columns: bool = False
     metric_for_best_model: str = "eval_loss"
@@ -99,6 +101,19 @@ class TrainConfig:
     training: HFTrainingConfig = field(default_factory=HFTrainingConfig)
     wandb: WandBConfig = field(default_factory=WandBConfig)
 
+    def __post_init__(self):
+        """Convert dict fields to proper dataclass instances."""
+        if isinstance(self.dataset, dict):
+            self.dataset = DatasetConfig(**self.dataset)
+        if isinstance(self.model, dict):
+            self.model = ModelConfig(**self.model)
+        if isinstance(self.lora, dict):
+            self.lora = LoRAConfig(**self.lora)
+        if isinstance(self.training, dict):
+            self.training = HFTrainingConfig(**self.training)
+        if isinstance(self.wandb, dict):
+            self.wandb = WandBConfig(**self.wandb)
+
     @staticmethod
     def from_flat_dict(flat_config: dict) -> "TrainConfig":
         """
@@ -129,6 +144,7 @@ class TrainConfig:
             "per_device_eval_batch_size": ("training", "per_device_eval_batch_size"),
             "gradient_accumulation_steps": ("training", "gradient_accumulation_steps"),
             "learning_rate": ("training", "learning_rate"),
+            "lr_scheduler_type": ("training", "lr_scheduler_type"),
             "warmup_steps": ("training", "warmup_steps"),
             "logging_steps": ("training", "logging_steps"),
             "eval_steps": ("training", "eval_steps"),
@@ -138,6 +154,7 @@ class TrainConfig:
             "load_best_model_at_end": ("training", "load_best_model_at_end"),
             "eval_strategy": ("training", "eval_strategy"),
             "fp16": ("training", "fp16"),
+            "bf16": ("training", "bf16"),
             "dataloader_drop_last": ("training", "dataloader_drop_last"),
             "remove_unused_columns": ("training", "remove_unused_columns"),
             "metric_for_best_model": ("training", "metric_for_best_model"),
@@ -239,6 +256,10 @@ class TrainConfig:
         return self.training.learning_rate
 
     @property
+    def lr_scheduler_type(self) -> str:
+        return self.training.lr_scheduler_type
+
+    @property
     def warmup_steps(self) -> int:
         return self.training.warmup_steps
 
@@ -273,6 +294,10 @@ class TrainConfig:
     @property
     def fp16(self) -> bool:
         return self.training.fp16
+
+    @property
+    def bf16(self) -> bool:
+        return self.training.bf16
 
     @property
     def dataloader_drop_last(self) -> bool:
