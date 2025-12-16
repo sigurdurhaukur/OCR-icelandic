@@ -106,7 +106,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
     ]
 
     def filter_bad_fonts(example):
-        return not any(bad_font in example["image_path"] for bad_font in font_blacklist)
+        return not any(bad_font in example["font_path"] for bad_font in font_blacklist)
 
     # filter the dataset to remove bad fonts
     ds = ds.filter(filter_bad_fonts)
