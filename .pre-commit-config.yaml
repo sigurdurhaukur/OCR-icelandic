@@ -9,6 +9,10 @@ repos:
     -   id: check-yaml
     -   id: check-json
     -   id: check-added-large-files
+        exclude: ^assets
+    -   id: check-added-large-files
+        args: ['--maxkb=2048']
+        files: ^assets
     -   id: check-case-conflict
     -   id: check-merge-conflict
     -   id: end-of-file-fixer

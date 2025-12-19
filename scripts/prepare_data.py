@@ -15,7 +15,8 @@ from typing import cast
 from datasets import Dataset, DatasetDict, Image, load_dataset
 from fontTools.ttLib import TTFont
 import psutil
-from ocr_icelandic.utils import apply_random_transformation, create_image_with_text
+from ocr_icelandic.transformations import apply_random_transformation
+from ocr_icelandic.utils import create_image_with_text
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from rich.logging import RichHandler
@@ -40,7 +41,7 @@ class DataConfig:
     data_directory: str = "parla"  # Subdirectory or config name in the dataset
     split: str = "train"  # Which split to use from the dataset
     max_length: int = 512
-    max_entries: int = 400
+    max_entries: int = 10
     show_sample: bool = False  # Whether to show a sample image after creation
     image_width: int = 512
     image_height: int = 512
@@ -55,6 +56,7 @@ class DataConfig:
     output_path: str = "isl_synthetic_ocr_output"  # Directory to save dataset
     num_examples: int = 0  # Number of examples to generate
     push_to_hub: bool = False  # Whether to push dataset to Hugging Face Hub
+    save_to_disk: bool = False  # Whether to save dataset to disk
     hub_repo_id: str = (
         "Sigurdur/isl_synthetic_ocr"  # Hugging Face repo ID to push dataset
     )
@@ -70,6 +72,7 @@ class DataConfig:
     column_width: int | None = None  # Fixed column width in pixels (None => random)
     min_column_width: int = 100  # Minimum column width when randomizing
     max_column_width: int = 512  # Maximum column width when randomizing
+    local_output_dir: str = "./local_output"  # Local directory for temporary outputs
 
 
 @dataclass
@@ -97,7 +100,7 @@ class SingleImageData:
     text_vertical_alignment: str
     text_horizontal_alignment: str
     paragraph_bboxes: list[dict]
-    transformation: dict
+    transformations: list[dict]
 
 
 def get_random_background_color():
@@ -347,7 +350,7 @@ def generate_single_text(
                     text_vertical_alignment=vertical_alignment,
                     text_horizontal_alignment=alignment,
                     paragraph_bboxes=transformed_paragraph_bboxes,
-                    transformation=transformation_meta,
+                    transformations=transformation_meta,
                 )
             )
 
@@ -438,7 +441,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                         image_data.text_horizontal_alignment
                     )
                     new_data["paragraph_bboxes"].append(image_data.paragraph_bboxes)
-                    new_data["transformation"].append(image_data.transformation)
+                    new_data["transformations"].append(image_data.transformations)
             except Exception as e:
                 logger.error(f"Error processing text: {e}")
                 continue
@@ -508,7 +511,8 @@ def create_image_dataset(cfg: DataConfig) -> None:
     # Use DatasetDict for saving splits
 
     dataset_dict = DatasetDict(list(final_dataset.items()))
-    dataset_dict.save_to_disk(output_path)
+    if cfg.save_to_disk:
+        dataset_dict.save_to_disk(output_path)
     logger.info(f"Image dataset saved to {output_path}")
 
     # Display the first image as an example
@@ -520,6 +524,21 @@ def create_image_dataset(cfg: DataConfig) -> None:
         logger.info(f"Pushing dataset to the hub at {cfg.hub_repo_id}...")
         dataset_dict.push_to_hub(cfg.hub_repo_id)
         logger.info("Dataset pushed to the hub successfully.")
+
+    if cfg.local_output_dir:
+        local_output_path = Path(cfg.local_output_dir)
+        local_output_path.mkdir(parents=True, exist_ok=True)
+
+        for split, items in final_dataset.items():
+            split_path = local_output_path / split
+
+            split_path.mkdir(parents=True, exist_ok=True)
+            for idx, item in enumerate(items):
+                image: PILImage.Image = item["image"]
+                image_save_path = split_path / f"image_{idx:05d}.png"
+                image.save(image_save_path)
+
+        logger.info(f"Image dataset also saved to local directory {local_output_path}")
 
 
 def main() -> None:
