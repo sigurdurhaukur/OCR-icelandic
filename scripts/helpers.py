@@ -39,6 +39,7 @@ class HFTrainingConfig:
     """Configuration that maps directly to HuggingFace TrainingArguments."""
 
     output_dir: str = "./lora_results"
+    hf_hub_output_model_id: Optional[str] = "Sigurdur/smolvlm-ocr-icelandic"
     num_train_epochs: int = 1
     per_device_train_batch_size: int = 8
     per_device_eval_batch_size: int = 8
@@ -47,6 +48,7 @@ class HFTrainingConfig:
     lr_scheduler_type: str = "cosine"
     warmup_steps: int = 100
     logging_steps: int = 50
+    logging_first_step: bool = True
     eval_steps: int = 200
     save_strategy: str = "steps"
     save_steps: int = 200
@@ -139,6 +141,7 @@ class TrainConfig:
             "lora_dropout": ("lora", "lora_dropout"),
             # Training fields
             "output_dir": ("training", "output_dir"),
+            "hf_hub_output_model_id": ("training", "hf_hub_output_model_id"),
             "num_train_epochs": ("training", "num_train_epochs"),
             "per_device_train_batch_size": ("training", "per_device_train_batch_size"),
             "per_device_eval_batch_size": ("training", "per_device_eval_batch_size"),
@@ -147,6 +150,7 @@ class TrainConfig:
             "lr_scheduler_type": ("training", "lr_scheduler_type"),
             "warmup_steps": ("training", "warmup_steps"),
             "logging_steps": ("training", "logging_steps"),
+            "logging_first_step": ("training", "logging_first_step"),
             "eval_steps": ("training", "eval_steps"),
             "save_strategy": ("training", "save_strategy"),
             "save_steps": ("training", "save_steps"),

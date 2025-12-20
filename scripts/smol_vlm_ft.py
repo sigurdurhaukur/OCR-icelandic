@@ -2,6 +2,7 @@ import logging
 import sys
 from typing import Optional
 
+import evaluate
 import numpy as np
 import peft
 import torch
@@ -9,7 +10,6 @@ import transformers
 import wandb
 from datasets import load_dataset
 from helpers import TrainConfig
-from Levenshtein import distance as lev_distance
 from omegaconf import OmegaConf
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
@@ -19,6 +19,12 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
+# Load metrics once
+wer_metric = evaluate.load("wer")
+cer_metric = evaluate.load("cer")
+bleu_metric = evaluate.load("bleu")
+chrf_metric = evaluate.load("chrf")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,7 +102,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         for param in model.model.vision_model.parameters():
             param.requires_grad = False
 
-    ds = load_dataset(cfg.hf_dataset_id, trust_remote_code=True)
+    ds = load_dataset(cfg.hf_dataset_id)
 
     # blacklist bad fonts
     font_blacklist = [
@@ -105,15 +111,31 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         "Bodoni 72 Smallcaps Book.ttf",
     ]
 
-    def filter_bad_fonts(example):
+    def filter_bad_fonts(example: dict) -> bool:
+        """
+        Filter out examples with blacklisted fonts.
+        Args:
+            example (dict): A dataset example containing a "font_path" key.
+        Returns:
+            bool: True if the example's font is not blacklisted, False otherwise.
+        """
         return not any(bad_font in example["font_path"] for bad_font in font_blacklist)
 
     # filter the dataset to remove bad fonts
     ds = ds.filter(filter_bad_fonts)
 
     train_ds = ds["train"]
-    # validation_ds = ds["validation"]
+
+    # limit dataset size for faster experimentation
     validation_ds = ds["validation"].select(range(min(5, len(ds["validation"]))))
+    english_validation_ds = load_dataset(
+        "Sigurdur/eng_synthetic_ocr", split="validation"
+    ).select(range(min(5, len(english_validation_ds))))
+
+    multiple_validation_ds = {
+        "icelandic": validation_ds,
+        "english": english_validation_ds,
+    }
 
     image_token_id = processor.tokenizer.additional_special_tokens_ids[
         processor.tokenizer.additional_special_tokens.index("<image>")
@@ -151,7 +173,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         return batch
 
     def compute_text_metrics(predictions, labels):
-        """Compute OCR metrics using Levenshtein distance library."""
+        """Compute comprehensive OCR metrics."""
         # Convert to numpy if needed
         if isinstance(predictions, torch.Tensor):
             predictions = predictions.detach().cpu().numpy()
@@ -167,110 +189,79 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         decoded_preds = processor.batch_decode(predictions, skip_special_tokens=True)
         decoded_labels = processor.batch_decode(label_ids, skip_special_tokens=True)
 
+        # Compute standard metrics
+        wer = wer_metric.compute(predictions=decoded_preds, references=decoded_labels)
+        cer = cer_metric.compute(predictions=decoded_preds, references=decoded_labels)
+
+        # BLEU score (references need to be wrapped in lists for multiple references support)
+        bleu = bleu_metric.compute(
+            predictions=decoded_preds, references=[[ref] for ref in decoded_labels]
+        )
+
+        # Character n-gram F-score (chrF)
+        chrf = chrf_metric.compute(predictions=decoded_preds, references=decoded_labels)
+
         # Special Icelandic characters
         special_chars = set("þðáéíóúýæö")
 
-        # Initialize metrics
-        metrics = {
-            "total_words": 0,
-            "word_errors": 0,
-            "total_chars": 0,
-            "char_errors": 0,
-            "exact_matches": 0,
-            "special_correct": 0,
-            "special_total": 0,
-            "seq_acc_5": 0,
-            "seq_acc_10": 0,
-        }
+        # Initialize custom metrics
+        exact_matches = 0
+        special_correct = 0
+        special_total = 0
+        seq_acc_5 = 0
+        seq_acc_10 = 0
 
         for pred, label in zip(decoded_preds, decoded_labels):
             # Exact match
             if pred == label:
-                metrics["exact_matches"] += 1
+                exact_matches += 1
 
-            # Word-level metrics (using Levenshtein)
-            pred_words = pred.split()
-            label_words = label.split()
-            metrics["word_errors"] += lev_distance(pred_words, label_words)
-            metrics["total_words"] += len(label_words)
-
-            # Character-level metrics
-            char_dist = lev_distance(pred, label)
-            metrics["char_errors"] += char_dist
-            metrics["total_chars"] += len(label)
+            # Character error rate for this sample
+            sample_cer = cer_metric.compute(predictions=[pred], references=[label])
 
             # Sequence accuracy thresholds
-            if len(label) > 0:
-                cer = char_dist / len(label)
-                if cer < 0.05:
-                    metrics["seq_acc_5"] += 1
-                if cer < 0.10:
-                    metrics["seq_acc_10"] += 1
-
-            # Special character accuracy (position-based): Old method, but its too strict
-            # for i, char in enumerate(label.lower()):
-            #     if char in special_chars:
-            #         metrics["special_total"] += 1
-            #         if i < len(pred) and pred.lower()[i] == char:
-            #             metrics["special_correct"] += 1
+            if sample_cer < 0.05:
+                seq_acc_5 += 1
+            if sample_cer < 0.10:
+                seq_acc_10 += 1
 
             # Special character accuracy (count-based)
-            # Since we also report CER, this is acceptable
             for char in special_chars:
                 label_count = label.lower().count(char)
                 pred_count = pred.lower().count(char)
-                metrics["special_total"] += label_count
-                metrics["special_correct"] += min(label_count, pred_count)
+                special_total += label_count
+                special_correct += min(label_count, pred_count)
 
         n = len(decoded_labels)
-
         return {
-            "wer": metrics["word_errors"] / max(metrics["total_words"], 1),
-            "cer": metrics["char_errors"] / max(metrics["total_chars"], 1),
-            "exact_match": metrics["exact_matches"] / n,
-            "special_char_acc": metrics["special_correct"]
-            / max(metrics["special_total"], 1),
-            "seq_acc_5": metrics["seq_acc_5"] / n,
-            "seq_acc_10": metrics["seq_acc_10"] / n,
+            # Standard OCR metrics
+            "wer": wer,
+            "cer": cer,
+            "bleu": bleu["bleu"],  # BLEU returns a dict with multiple scores
+            "chrf": chrf["score"],  # chrF returns a dict
+            # Custom metrics
+            "exact_match": exact_matches / n,
+            "special_char_acc": special_correct / max(special_total, 1),
+            "seq_acc_5": seq_acc_5 / n,
+            "seq_acc_10": seq_acc_10 / n,
         }
 
     def compute_metrics(eval_preds):
         """Compute metrics function for Trainer."""
-
-        # eval_preds is an EvalPrediction object with predictions and label_ids attributes
         predictions = eval_preds.predictions
         labels = eval_preds.label_ids
 
-        # Handle tuple predictions (e.g., when model returns logits and hidden states)
+        # Handle tuple predictions
         if isinstance(predictions, tuple):
             predictions = predictions[0]
 
         return compute_text_metrics(predictions, labels)
 
     # Initialize wandb
-    run = wandb.init(
-        entity=cfg.wandb.entity,
-        project=cfg.wandb.project,
-        config={
-            "learning_rate": cfg.training.learning_rate,
-            "batch_size": cfg.training.per_device_train_batch_size,
-            "eval_batch_size": cfg.training.per_device_eval_batch_size,
-            "gradient_accumulation_steps": cfg.training.gradient_accumulation_steps,
-            "num_train_epochs": cfg.training.num_train_epochs,
-            "lora_r": cfg.lora.lora_r,
-            "lora_alpha": cfg.lora.lora_alpha,
-            "lora_dropout": cfg.lora.lora_dropout,
-            "model_id": cfg.model.model_id,
-            "hf_dataset_id": cfg.dataset.hf_dataset_id,
-            "hf_data_directory": cfg.dataset.hf_data_directory,
-            "max_length": cfg.dataset.max_length,
-            "max_entries": cfg.dataset.max_entries,
-            "max_eval_entries": cfg.dataset.max_eval_entries,
-            "push_to_hub": cfg.model.push_to_hub,
-            "hub_repo_id": cfg.model.hub_repo_id,
-            "fp16": cfg.training.fp16,
-            "eval_steps": cfg.training.eval_steps,
-            "eval_strategy": cfg.training.eval_strategy,
+    # Convert config to dict and add runtime info
+    config_dict = OmegaConf.to_container(cfg, resolve=True)
+    config_dict.update(
+        {
             # Hardware info
             "device": DEVICE,
             "gpu_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
@@ -293,19 +284,28 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
             "trainable_params": sum(
                 p.numel() for p in model.parameters() if p.requires_grad
             ),
-            "lora_target_modules": lora_config.target_modules,
+            "lora_target_modules": lora_config.target_modules
+            if USE_LORA or USE_QLORA
+            else None,
             # Environment
             "python_version": sys.version,
             "torch_version": torch.__version__,
             "transformers_version": transformers.__version__,
             "peft_version": peft.__version__,
-        },
+        }
+    )
+
+    # Initialize wandb
+    wandb.init(
+        entity=cfg.wandb.entity,
+        project=cfg.wandb.project,
+        config=config_dict,
     )
 
     # Use the new config structure to create TrainingArguments cleanly
     training_args = cfg.training.to_training_args(
-        output_dir=f"./{model_id.split('/')[-1]}-ocr-isl-with-isl-bacbone",
-        hub_model_id=f"{model_id.split('/')[-1]}-ocr-isl-with-isl-backbone",
+        output_dir=cfg.training.output_dir,
+        hub_model_id=cfg.training.hf_hub_output_model_id,
         weight_decay=0.01,
         optim="paged_adamw_8bit",
         bf16=cfg.training.bf16,
@@ -320,7 +320,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         args=training_args,
         data_collator=collate_fn,
         train_dataset=train_ds,
-        eval_dataset=validation_ds,
+        eval_dataset=multiple_validation_ds,
         compute_metrics=compute_metrics,
     )
 

@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --time=50:00:00
-#SBATCH --job-name=smolVLM_lora_icelandic_v3
-#SBATCH --output=logs/smolVLM_lora_icelandic_v5-%j.log
-#SBATCH --error=logs/smolVLM_lora_icelandic_v5-%j.err
+#SBATCH --job-name=smolVLM_lora_icelandic_v6
+#SBATCH --output=logs/smolVLM_lora_icelandic_v6-%j.log
+#SBATCH --error=logs/smolVLM_lora_icelandic_v6-%j.err
 #SBATCH --gpus-per-node=a100:1
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
@@ -20,7 +20,7 @@ module load Boost/1.79.0-GCC-11.3.0
 mkdir -p $SCRATCH
 
 # Experiment configuration
-EXPERIMENT_NAME="smolVLM-lora-icelandic-v5"
+EXPERIMENT_NAME="smolVLM-lora-icelandic-v6"
 MODEL_VERSION="base"
 DATASET_VERSION="Sigurdur/isl_synthetic_ocr"
 LORA_CONFIG="r16-alpha32"
@@ -58,6 +58,7 @@ python3 scripts/smol_vlm_ft.py \
     warmup_steps=500 \
     output_dir="smolVLM_lora_icelandic_v4" \
     model_id="HuggingFaceTB/SmolVLM-Base" \
+    hf_hub_output_model_id="Sigurdur/smolVLM-icelandic-synthetic-ocr-v5" \
     eval_steps=125 \
     run_name="smolVLM_icelandic_synthetic_ocr_v5" \
     learning_rate=3e-4 \
