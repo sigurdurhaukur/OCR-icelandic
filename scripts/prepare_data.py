@@ -2,6 +2,21 @@
 Script to prepare a dataset with images generated from text data.
 Handles text overflow by creating multiple images if necessary.
 Saves the new dataset to disk and optionally pushes it to the Hugging Face Hub.
+
+Generating english synthetic OCR eval dataset as an example:
+
+python scripts/prepare_data.py \
+    dataset_path="agentlans/high-quality-english-sentences" \
+    text_column="text" \
+    data_directory="default" \
+    split="train" \
+    max_entries=1000 \
+    max_num_columns=1 \
+    output_path="eng_synthetic_ocr_output" \
+    num_examples=1000 \
+    push_to_hub=True \
+    hub_repo_id="Sigurdur/eng_synthetic_ocr"
+
 """
 
 import logging
@@ -13,9 +28,10 @@ from typing import cast
 
 from datasets import Dataset, DatasetDict, Image, load_dataset
 from fontTools.ttLib import TTFont
-from ocr_iceladic.utils import apply_random_transformation, create_image_with_text
 from omegaconf import OmegaConf
 from tqdm import tqdm
+
+from ocr_icelandic.utils import apply_random_transformation, create_image_with_text
 
 logging.basicConfig(
     level=logging.INFO,
@@ -447,4 +463,12 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    main()
+    main()
+    main()
+    main()
+    main()
+    main()
+    main()
+    main()
     main()
