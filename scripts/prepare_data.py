@@ -3,19 +3,34 @@ Script to prepare a dataset with images generated from text data.
 Handles text overflow by creating multiple images if necessary.
 Saves the new dataset to disk and optionally pushes it to the Hugging Face Hub.
 
-Generating english synthetic OCR eval dataset as an example:
+Generating english synthetic OCR dataset as an example:
 
 python scripts/prepare_data.py \
     dataset_path="agentlans/high-quality-english-sentences" \
     text_column="text" \
     data_directory="default" \
     split="train" \
-    max_entries=1000 \
+    max_entries=100 \
     max_num_columns=1 \
     output_path="eng_synthetic_ocr_output" \
     num_examples=1000 \
     push_to_hub=True \
-    hub_repo_id="Sigurdur/eng_synthetic_ocr"
+    hub_repo_id="Sigurdur/eng_synthetic_ocr" \
+    apply_random_transformations=False \
+    use_random_font_colors=False \
+
+Generating icelandic synthetic OCR dataset as an example:
+
+python scripts/prepare_data.py \
+    dataset_path="arnastofnun/IGC-2024" \
+    text_column="document" \
+    data_directory="parla" \
+    split="train" \
+    max_entries=400 \
+    output_path="isl_synthetic_ocr_output" \
+    num_examples=2000 \
+    push_to_hub=True \
+    hub_repo_id="Sigurdur/isl_synthetic_ocr" \
 
 """
 
@@ -86,6 +101,7 @@ class DataConfig:
     column_width: int | None = None  # Fixed column width in pixels (None => random)
     min_column_width: int = 100  # Minimum column width when randomizing
     max_column_width: int = 512  # Maximum column width when randomizing
+    apply_random_transformations: bool = True  # Whether to apply random transformations
 
 
 @dataclass
@@ -205,10 +221,22 @@ def split_long_text(text: str, max_length: int) -> list[str]:
     return chunks
 
 
-def check_font_supports_char(fontpath, unicode_char):
+def check_font_supports_char(fontpath: str | Path, unicode_char: str) -> bool:
+    """
+    Check if a font supports a specific unicode character.
+    Args:
+        fontpath (str or Path): Path to the font file
+        unicode_char (str): The unicode character to check
+    Returns:
+        bool: True if the font supports the character, False otherwise
+    """
     font = TTFont(fontpath)  # specify the path to the font in question
 
-    for cmap in font["cmap"].tables:
+    cmap_table = font.get("cmap")
+    if cmap_table is None:
+        return False
+
+    for cmap in cmap_table.tables:
         if cmap.isUnicode():
             if ord(unicode_char) in cmap.cmap:
                 return True
@@ -216,6 +244,11 @@ def check_font_supports_char(fontpath, unicode_char):
 
 
 def get_icelandic_compatible_fonts():
+    """
+    Scan common font directories for fonts that support Icelandic characters.
+    Returns:
+        list of str: Paths to fonts that support Icelandic characters
+    """
     # load fonts from font directory
 
     random.seed(42)  # For reproducibility
@@ -225,19 +258,19 @@ def get_icelandic_compatible_fonts():
 
     font_dirs = []
 
-    # macos
+    # Macos
     if current_os.startswith("darwin"):
         font_dirs = [
             "/System/Library/Fonts",
             "/System/Library/Fonts/Supplemental",
         ]
-    # linux
+    # Linux
     if current_os.startswith("linux"):
         font_dirs += [
             "/usr/share/fonts",
             "/usr/local/share/fonts",
         ]
-    # windows
+    # Windows
     if current_os.startswith("win"):
         font_dirs += [
             str(Path.home() / "AppData/Local/Microsoft/Windows/Fonts"),
@@ -245,7 +278,7 @@ def get_icelandic_compatible_fonts():
             "C:/Windows/Fonts",
         ]
 
-    logger.info(f"Searching for fonts in directories: {font_dirs}")
+    logger.info("Searching for fonts in directories: %s", font_dirs)
 
     available_fonts: list[str] = []
     characters_to_check = "ÁáÐðÉéÍíÓóÚúÝýÞþÆæÖö"
@@ -258,7 +291,7 @@ def get_icelandic_compatible_fonts():
                         available_fonts.append(str(font_file))
                         break  # No need to check other characters for this font
 
-    logger.info(f"Found {len(available_fonts)} Icelandic-compatible fonts.")
+    logger.info("Found %d Icelandic-compatible fonts.", len(available_fonts))
 
     return available_fonts
 
@@ -266,7 +299,17 @@ def get_icelandic_compatible_fonts():
 def _normalize_range(
     min_value: int, max_value: int, minimum: int = 1
 ) -> tuple[int, int]:
-    """Ensure provided min/max values form a valid range."""
+    """
+    Ensure provided min/max values form a valid range.
+
+    Args:
+        min_value (int): Minimum value
+        max_value (int): Maximum value
+        minimum (int): Minimum allowed value for min_value
+
+    Returns:
+        tuple[int, int]: Normalized (min_value, max_value)
+    """
 
     min_value = max(minimum, min_value)
     max_value = max(min_value, max_value)
@@ -276,6 +319,16 @@ def _normalize_range(
 def generate_single_text(
     text: str, cfg: GenerationConfig
 ) -> tuple[list[SingleImageData], int]:
+    """
+    Generate images for a single text entry, handling overflow by creating multiple images.
+
+    Args:
+        text (str): The text to convert to images
+        cfg (GenerationConfig): Configuration for image generation
+    Returns:
+        tuple: (List of SingleImageData, number of splits)
+    """
+
     # Split long texts first
     text_chunks = split_long_text(text.strip(), cfg.max_text_length)
 
@@ -337,17 +390,22 @@ def generate_single_text(
                 column_width=column_width,
             )
 
-            transformed_image, transformation_meta, transformed_paragraph_bboxes = (
-                apply_random_transformation(
-                    image,
-                    current_bg_color,
-                    paragraph_bboxes=paragraph_bboxes,
-                )
-            )
-
             if not fitted_text:
                 # No text could be fitted, break to avoid infinite loop
                 break
+
+            if cfg.apply_random_transformations:
+                transformed_image, transformation_meta, transformed_paragraph_bboxes = (
+                    apply_random_transformation(
+                        image,
+                        current_bg_color,
+                        paragraph_bboxes=paragraph_bboxes,
+                    )
+                )
+            else:
+                transformed_image = image
+                transformation_meta = {"type": "none"}
+                transformed_paragraph_bboxes = paragraph_bboxes
 
             images.append(
                 SingleImageData(
@@ -415,7 +473,8 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     # Use physical cores for CPU-bound tasks
     max_workers = min(psutil.cpu_count(logical=False) or 4, len(texts[:num_examples]))
     logger.info(
-        f"Using {max_workers} parallel workers (physical cores) for image generation."
+        "Using %d parallel workers (physical cores) for image generation.",
+        max_workers,
     )
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -455,12 +514,15 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     )
                     new_data["paragraph_bboxes"].append(image_data.paragraph_bboxes)
                     new_data["transformation"].append(image_data.transformation)
-            except Exception as e:
-                logger.error(f"Error processing text: {e}")
+            except (OSError, ValueError, RuntimeError) as e:
+                logger.error("Error processing text: %s", e)
                 continue
 
     logger.info(
-        f"Split {split_texts} long texts into multiple chunks, in total generating {total_splits} images from {len(texts)}."
+        "Split %d long texts into multiple chunks, in total generating %d images from %d.",
+        split_texts,
+        total_splits,
+        len(texts),
     )
 
     # Create a new Hugging Face Dataset
@@ -469,10 +531,18 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
 
 
 def display_sample(dataset: dict) -> None:
+    """
+    Display the first generated image from the dataset.
+
+    Args:
+        dataset (dict): The dataset containing splits
+    Returns:
+        None
+    """
     logger.info("\nShowing first generated image...")
     if len(dataset["train"]) > 0:
         logger.info("Text for first image:")
-        logger.info(f"'{dataset['train'][0]['text']}'")
+        logger.info("'%s'", dataset["train"][0]["text"])
         dataset["train"][0]["image"].show()
 
 
@@ -500,15 +570,15 @@ def create_image_dataset(cfg: DataConfig) -> None:
 
     # rename text column to 'text' if necessary
     if cfg.text_column != "text":
-        logger.info(f"Renaming text column '{cfg.text_column}' to 'text'")
+        logger.info("Renaming text column '%s' to 'text'", cfg.text_column)
         dataset = dataset.rename_column(cfg.text_column, "text")
         cfg.text_column = "text"
 
     # Create a new dataset with an 'image' column for each text
     image_dataset = generate_image_dataset(texts, cfg)
 
-    logger.info(f"\nOriginal dataset size: {len(texts)}")
-    logger.info(f"New image dataset size: {len(image_dataset)}")
+    logger.info("\nOriginal dataset size: %d", len(texts))
+    logger.info("New image dataset size: %d", len(image_dataset))
 
     # Create a train/test/validation split (80/10/10)
     split_dataset = image_dataset.train_test_split(test_size=0.2, seed=42)
@@ -525,7 +595,7 @@ def create_image_dataset(cfg: DataConfig) -> None:
 
     dataset_dict = DatasetDict(list(final_dataset.items()))
     dataset_dict.save_to_disk(output_path)
-    logger.info(f"Image dataset saved to {output_path}")
+    logger.info("Image dataset saved to %s", output_path)
 
     # Display the first image as an example
     if cfg.show_sample:
@@ -533,7 +603,7 @@ def create_image_dataset(cfg: DataConfig) -> None:
 
     # upload to huggingface dataset hub
     if cfg.push_to_hub and cfg.hub_repo_id:
-        logger.info(f"Pushing dataset to the hub at {cfg.hub_repo_id}...")
+        logger.info("Pushing dataset to the hub at %s...", cfg.hub_repo_id)
         dataset_dict.push_to_hub(cfg.hub_repo_id)
         logger.info("Dataset pushed to the hub successfully.")
 
@@ -543,11 +613,11 @@ def main() -> None:
     cfg = OmegaConf.structured(DataConfig)
     cli_cfg = OmegaConf.from_cli()
     cfg = OmegaConf.merge(cfg, cli_cfg)
-    cfg = OmegaConf.to_container(cfg, resolve=True)
+    cfg_dict = cast(dict[str, any], OmegaConf.to_container(cfg, resolve=True))
     try:
-        cfg = DataConfig(**cfg)
+        cfg = DataConfig(**cfg_dict)
     except TypeError as e:  # pylint: disable=broad-exception-raised
-        logger.error(f"Error: {e}\n\nUsage: python scratch.py")
+        logger.error("Error: %s\n\nUsage: python scratch.py", e)
         sys.exit(1)
 
     create_image_dataset(cfg)
