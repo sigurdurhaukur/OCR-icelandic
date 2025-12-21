@@ -1,25 +1,24 @@
 import logging
 import sys
-from typing import Optional
+from dataclasses import asdict
 
 import evaluate
 import numpy as np
 import peft
 import torch
 import transformers
-import wandb
 from datasets import load_dataset
 from helpers import TrainConfig
 from omegaconf import OmegaConf
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
+    AutoModelForImageTextToText,
     AutoProcessor,
     BitsAndBytesConfig,
-    Idefics3ForConditionalGeneration,
     Trainer,
-    TrainingArguments,
 )
-from dataclasses import asdict
+
+import wandb
 
 # Load metrics once
 wer_metric = evaluate.load("wer")
@@ -69,7 +68,8 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
                 "up_proj",
                 "v_proj",
             ],
-            use_dora=False if USE_QLORA else True,
+            # use_dora=False if USE_QLORA else True,
+            use_dora=False,
             init_lora_weights="gaussian",
         )
         lora_config.inference_mode = False
@@ -80,22 +80,25 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
-            model = prepare_model_for_kbit_training(model)
 
-        model = Idefics3ForConditionalGeneration.from_pretrained(
+        model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             quantization_config=bnb_config if USE_QLORA else None,
             # _attn_implementation="flash_attention_2",
             device_map="auto",
         )
-        model.add_adapter(lora_config) # don't add adapter twice
-        model.enable_adapters()
+        model.gradient_checkpointing_enable()
         model = get_peft_model(model, lora_config)
         trainable, total = model.get_nb_trainable_parameters()
-        print(f"Trainable parameters: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
+        print(
+            f"Trainable parameters: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
+
+        if USE_QLORA:
+            model = prepare_model_for_kbit_training(model)
 
     else:
-        model = Idefics3ForConditionalGeneration.from_pretrained(
+        model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             # _attn_implementation="flash_attention_2",
@@ -342,7 +345,7 @@ def main() -> None:
 
     # Merge with default config
     cfg = OmegaConf.merge(cfg, nested_cli)
-    cfg = OmegaConf.to_container(cfg, resolve=True) # try not converting to dict
+    cfg = OmegaConf.to_container(cfg, resolve=True)  # try not converting to dict
 
     try:
         cfg = TrainConfig(**cfg)
