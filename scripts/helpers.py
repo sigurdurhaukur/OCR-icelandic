@@ -66,6 +66,12 @@ class HFTrainingConfig:
     def to_training_args(self, **overrides) -> TrainingArguments:
         """Convert to TrainingArguments with optional overrides."""
         args_dict = asdict(self)
+
+
+        # Map custom field names to HF TrainingArguments parameter names
+        if 'hf_hub_output_model_id' in args_dict:
+            args_dict['hub_model_id'] = args_dict.pop('hf_hub_output_model_id')
+
         args_dict.update(overrides)
         return TrainingArguments(**args_dict)
 

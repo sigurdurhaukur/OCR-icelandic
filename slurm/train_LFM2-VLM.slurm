@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --time=50:00:00
-#SBATCH --job-name=smolVLM_lora_icelandic_v6
-#SBATCH --output=logs/smolVLM_lora_icelandic_v6-%j.log
-#SBATCH --error=logs/smolVLM_lora_icelandic_v6-%j.err
+#SBATCH --job-name=LFM2_lora_icelandic_v1
+#SBATCH --output=logs/LFM2_lora_icelandic_v1-%j.log
+#SBATCH --error=logs/LFM2_lora_icelandic_v1-%j.err
 #SBATCH --gpus-per-node=a100:1
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=8
@@ -20,7 +20,7 @@ module load Boost/1.79.0-GCC-11.3.0
 mkdir -p $SCRATCH
 
 # Experiment configuration
-EXPERIMENT_NAME="smolVLM-lora-icelandic-v6"
+EXPERIMENT_NAME="LFM2-lora-icelandic-v1"
 MODEL_VERSION="base"
 DATASET_VERSION="Sigurdur/isl_synthetic_ocr"
 LORA_CONFIG="r16-alpha32"
@@ -47,7 +47,7 @@ echo "========================"
 # run our fine-tuning script
 cd $SCRATCH
 source $SCRATCH/.venv/bin/activate
-uv sync --group train 
+uv sync
 
 python3 scripts/smol_vlm_ft.py \
     push_to_hub=True \
@@ -56,14 +56,12 @@ python3 scripts/smol_vlm_ft.py \
     logging_steps=50 \
     save_steps=500 \
     warmup_steps=500 \
-    output_dir="smolVLM_lora_icelandic_v4" \
-    model_id="HuggingFaceTB/SmolVLM-Base" \
-    hf_hub_output_model_id="Sigurdur/smolVLM-icelandic-synthetic-ocr-v5" \
+    output_dir="LFM2_lora_icelandic_v1" \
+    model_id="LiquidAI/LFM2-VL-450M" \
     eval_steps=125 \
-    run_name="smolVLM_icelandic_synthetic_ocr_v5" \
+    run_name="LFM2_icelandic_synthetic_ocr_v1" \
     learning_rate=3e-4 \
     hf_dataset_id="Sigurdur/isl_synthetic_ocr" \
-    metric_for_best_model="eval_icelandic_cer"
 
 
 # Log completion

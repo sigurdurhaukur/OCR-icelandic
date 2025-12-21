@@ -19,6 +19,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from dataclasses import asdict
 
 # Load metrics once
 wer_metric = evaluate.load("wer")
@@ -41,16 +42,17 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         processor = AutoProcessor.from_pretrained(
-            cfg.model_id
+            cfg.model.model_id
         )  # use the processor from the base model
 
     except Exception as e:
-        logger.error(f"Error loading processor for model {cfg.model_id}: {e}")
+        logger.error(f"Error loading processor for model {cfg.model.model_id}: {e}")
         processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-Base")
         logger.info("Loaded default processor HuggingFaceTB/SmolVLM-Base")
 
     # our custom model, with pre-trained LLM backbone on Icelandic text
-    model_id = cfg.model_id  # ./full_idefics3_lora_merged
+    model_id = cfg.model.model_id  # ./full_idefics3_lora_merged
+    logging.info(f"Loading model {model_id} with QLoRA: {USE_QLORA}")
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
     if USE_QLORA or USE_LORA:
@@ -78,19 +80,20 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_compute_dtype=torch.bfloat16,
             )
+            model = prepare_model_for_kbit_training(model)
 
-        print("Loading model...")
         model = Idefics3ForConditionalGeneration.from_pretrained(
             model_id,
             quantization_config=bnb_config if USE_QLORA else None,
             # _attn_implementation="flash_attention_2",
             device_map="auto",
         )
-        model.add_adapter(lora_config)
+        model.add_adapter(lora_config) # don't add adapter twice
         model.enable_adapters()
-        model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, lora_config)
-        print(model.get_nb_trainable_parameters())
+        trainable, total = model.get_nb_trainable_parameters()
+        print(f"Trainable parameters: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
+
     else:
         model = Idefics3ForConditionalGeneration.from_pretrained(
             model_id,
@@ -130,7 +133,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
     validation_ds = ds["validation"].select(range(min(5, len(ds["validation"]))))
     english_validation_ds = load_dataset(
         "Sigurdur/eng_synthetic_ocr", split="validation"
-    ).select(range(min(5, len(english_validation_ds))))
+    ).select(range(5))
 
     multiple_validation_ds = {
         "icelandic": validation_ds,
@@ -259,7 +262,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
 
     # Initialize wandb
     # Convert config to dict and add runtime info
-    config_dict = OmegaConf.to_container(cfg, resolve=True)
+    config_dict = asdict(cfg)
     config_dict.update(
         {
             # Hardware info
@@ -339,7 +342,7 @@ def main() -> None:
 
     # Merge with default config
     cfg = OmegaConf.merge(cfg, nested_cli)
-    cfg = OmegaConf.to_container(cfg, resolve=True)
+    cfg = OmegaConf.to_container(cfg, resolve=True) # try not converting to dict
 
     try:
         cfg = TrainConfig(**cfg)

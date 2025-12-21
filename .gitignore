@@ -7,6 +7,7 @@ synthetic_output
 gold_data
 isl_synthetic_ocr_output
 fonts
+SmolVLM-Base-ocr-isl-with-isl-bacbone
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

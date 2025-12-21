@@ -45,4 +45,7 @@ train = [
     "ipywidgets>=8.1.7",
     "bitsandbytes>=0.48.1",
     "python-levenshtein>=0.27.3",
+    "evaluate>=0.4.6",
+    "jiwer>=4.0.0",
+    "sacrebleu>=2.5.1",
 ]
