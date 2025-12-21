@@ -13,9 +13,9 @@ from helpers import TrainConfig
 from omegaconf import OmegaConf
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import (
+    AutoModelForImageTextToText,
     AutoProcessor,
     BitsAndBytesConfig,
-    Idefics3ForConditionalGeneration,
     Trainer,
     TrainingArguments,
 )
@@ -80,19 +80,20 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
             )
 
         print("Loading model...")
-        model = Idefics3ForConditionalGeneration.from_pretrained(
+        logging.info(f"Loading model {model_id} with QLoRA: {USE_QLORA}")
+        model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             quantization_config=bnb_config if USE_QLORA else None,
             # _attn_implementation="flash_attention_2",
             device_map="auto",
         )
-        model.add_adapter(lora_config)
-        model.enable_adapters()
+        # model.add_adapter(lora_config)
+        # model.enable_adapters()
         model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, lora_config)
         print(model.get_nb_trainable_parameters())
     else:
-        model = Idefics3ForConditionalGeneration.from_pretrained(
+        model = AutoModelForImageTextToText.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
             # _attn_implementation="flash_attention_2",
