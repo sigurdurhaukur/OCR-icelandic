@@ -89,14 +89,14 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         )
         model.gradient_checkpointing_enable()
         model = get_peft_model(model, lora_config)
-        trainable, total = model.get_nb_trainable_parameters()
-        print(
-            f"Trainable parameters: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
-        )
 
         if USE_QLORA:
             model = prepare_model_for_kbit_training(model)
 
+        trainable, total = model.get_nb_trainable_parameters()
+        print(
+            f"Trainable parameters: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)"
+        )
     else:
         model = AutoModelForImageTextToText.from_pretrained(
             model_id,

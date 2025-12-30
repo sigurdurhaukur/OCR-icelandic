@@ -47,7 +47,7 @@ echo "========================"
 # run our fine-tuning script
 cd $SCRATCH
 source $SCRATCH/.venv/bin/activate
-uv sync
+uv sync --group train
 
 python3 scripts/smol_vlm_ft.py \
     push_to_hub=True \
@@ -58,11 +58,12 @@ python3 scripts/smol_vlm_ft.py \
     warmup_steps=500 \
     output_dir="LFM2_lora_icelandic_v1" \
     model_id="LiquidAI/LFM2-VL-450M" \
+    hf_hub_output_model_id="Sigurdur/LFM2-lora-icelandic-synthetic-ocr-v1" \
     eval_steps=125 \
     run_name="LFM2_icelandic_synthetic_ocr_v1" \
     learning_rate=3e-4 \
     hf_dataset_id="Sigurdur/isl_synthetic_ocr" \
-
+    metric_for_best_model="eval_icelandic_cer"
 
 # Log completion
 echo "=== Job Completion ==="
