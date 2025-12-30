@@ -32,7 +32,7 @@ model_id = "HuggingFaceTB/SmolVLM-Base"
 
 processor = AutoProcessor.from_pretrained(model_id)
 
-model_id = "./full_idefics3_lora_merged-ocr-isl-with-isl-bacbone/checkpoint-3000"
+# model_id = "./full_idefics3_lora_merged-ocr-isl-with-isl-bacbone/checkpoint-3000"
 model = AutoModelForVision2Seq.from_pretrained(
     model_id,
     torch_dtype=torch.bfloat16,
@@ -40,9 +40,9 @@ model = AutoModelForVision2Seq.from_pretrained(
 ).to("cuda")
 
 # load adapter weights if needed
-# model.load_adapter(
-#     "./SmolVLM-Base-ocr-isl/checkpoint-4000", adapter_name="checkpoint-4000"
-# )
+model.load_adapter(
+     "../SmolVLM-Base-ocr-isl", adapter_name="checkpoint-4000"
+)
 
 # Load test examples from the dataset
 print("Loading example images from dataset...")
