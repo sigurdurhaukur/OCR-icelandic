@@ -212,6 +212,11 @@ def create_image_with_text(
     )
     scaled_font_size = int(font_size * scale_factor)
 
+    # Scale column_width and column_gap if provided
+    if column_width is not None:
+        column_width = int(column_width * scale_factor)
+    column_gap = int(column_gap * scale_factor)
+
     image = Image.new("RGB", scaled_image_size, color=bg_color)
     image.info["dpi"] = (dpi, dpi)
     draw = ImageDraw.Draw(image)

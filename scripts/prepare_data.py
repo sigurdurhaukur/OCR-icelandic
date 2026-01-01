@@ -10,14 +10,15 @@ python scripts/prepare_data.py \
     text_column="text" \
     data_directory="default" \
     split="train" \
-    max_entries=100 \
+    max_entries=1 \
     max_num_columns=1 \
-    output_path="eng_synthetic_ocr_output" \
+    max_workers=1 \
+    output_path="eng_synthetic_ocr_output_v2" \
     num_examples=1000 \
     push_to_hub=True \
-    hub_repo_id="Sigurdur/eng_synthetic_ocr" \
+    hub_repo_id="Sigurdur/eng_synthetic_ocr_v2" \
     apply_random_transformations=False \
-    use_random_font_colors=False \
+    font_path="./icelandic_fonts" \
 
 Generating icelandic synthetic OCR dataset as an example:
 
@@ -26,25 +27,38 @@ python scripts/prepare_data.py \
     text_column="document" \
     data_directory="parla" \
     split="train" \
-    max_entries=400 \
-    output_path="isl_synthetic_ocr_output" \
+    max_entries=1 \
+    max_num_columns=1 \
+    max_workers=1 \
+    output_path="isl_synthetic_ocr_output_v2" \
     num_examples=2000 \
     push_to_hub=True \
-    hub_repo_id="Sigurdur/isl_synthetic_ocr" \
+    hub_repo_id="Sigurdur/isl_synthetic_ocr_v2" \
+    apply_random_transformations=False \
+    font_path="./icelandic_fonts" \
 
 """
 
+import gc
 import logging
 import random
+import shutil
 import sys
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import cast
 
-import psutil
-from datasets import Dataset, DatasetDict, Image, load_dataset
+from datasets import (
+    Dataset,
+    DatasetDict,
+    Image,
+    concatenate_datasets,
+    load_dataset,
+    load_from_disk,
+)
 from fontTools.ttLib import TTFont
 from omegaconf import OmegaConf
 from PIL import Image as PILImage
@@ -61,6 +75,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress fontTools warnings
+logging.getLogger("fontTools").setLevel(logging.ERROR)
+
 
 @dataclass
 class DataConfig:
@@ -75,10 +92,15 @@ class DataConfig:
     show_sample: bool = False  # Whether to show a sample image after creation
     image_width: int = 512
     image_height: int = 512
-    image_dpi: int = 72
+    image_dpi: int = 140  # Standard set by SmolDocling paper
     img_background_color: str = "white"
     font_path: str = "/usr/share/fonts"
     font_size: int = 12
+    min_font_size: int = 11  # Minimum font size when randomizing
+    max_font_size: int = 24  # Maximum font size when randomizing
+    use_random_font_sizes: bool = (
+        True  # Whether to use random font sizes for each sample
+    )
     font_color: str = "black"
     use_random_font_colors: bool = True  # Whether to use random font colors
     text_vertical_alignment: str = "center"  # top, middle, bottom
@@ -99,9 +121,13 @@ class DataConfig:
     min_num_columns: int = 1  # Minimum number of columns when randomizing
     max_num_columns: int = 5  # Maximum number of columns when randomizing
     column_width: int | None = None  # Fixed column width in pixels (None => random)
-    min_column_width: int = 100  # Minimum column width when randomizing
+    min_column_width: int = 512  # Minimum column width when randomizing
     max_column_width: int = 512  # Maximum column width when randomizing
     apply_random_transformations: bool = True  # Whether to apply random transformations
+    max_workers: int = (
+        1  # Number of parallel workers for image generation (1 for sequential)
+    )
+    batch_size: int = 50  # Number of images to hold in memory before flushing to disk
 
 
 @dataclass
@@ -110,7 +136,8 @@ class GenerationConfig(DataConfig):
 
     column_range: tuple[int, int] = (1, 1)
     column_width_range: tuple[int, int] = (100, 512)
-    available_fonts: list[str] | None = None
+    font_size_range: tuple[int, int] = (11, 24)
+    available_fonts: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -162,7 +189,8 @@ def get_random_background_color():
 
 
 def get_random_font_color(bg_color, contrast_threshold=100):
-    """Generate a random font color that contrasts with the background color."""
+    """Generate a random font color that contrasts with the background color.
+    Font colors are restricted to darker shades closer to black."""
 
     def luminance(color):
         r, g, b = color
@@ -171,9 +199,10 @@ def get_random_font_color(bg_color, contrast_threshold=100):
     bg_lum = luminance(bg_color)
 
     while True:
-        r = random.randint(0, 255)
-        g = random.randint(0, 255)
-        b = random.randint(0, 255)
+        # Restrict RGB values to 0-80 range for darker colors closer to black
+        r = random.randint(0, 80)
+        g = random.randint(0, 80)
+        b = random.randint(0, 80)
         font_color = (r, g, b)
         font_lum = luminance(font_color)
         if abs(bg_lum - font_lum) >= contrast_threshold:
@@ -243,24 +272,31 @@ def check_font_supports_char(fontpath: str | Path, unicode_char: str) -> bool:
     return False
 
 
-def get_icelandic_compatible_fonts():
+@lru_cache(maxsize=1)
+def get_icelandic_compatible_fonts(font_path: str | None = None) -> tuple[str, ...]:
     """
     Scan common font directories for fonts that support Icelandic characters.
+    Results are cached to avoid rescanning on subsequent calls.
     Returns:
-        list of str: Paths to fonts that support Icelandic characters
+        tuple of str: Paths to fonts that support Icelandic characters
     """
+    font_dirs = []
+
     # load fonts from font directory
+    if font_path is not None:
+        logger.info("Using provided font path: %s", font_path)
+        font_dirs = [font_path]
+    else:
+        logger.info("No font path provided, scanning common system font directories.")
 
     random.seed(42)  # For reproducibility
 
     # Check common font directories based on OS
     current_os = sys.platform
 
-    font_dirs = []
-
     # Macos
     if current_os.startswith("darwin"):
-        font_dirs = [
+        font_dirs += [
             "/System/Library/Fonts",
             "/System/Library/Fonts/Supplemental",
         ]
@@ -286,14 +322,16 @@ def get_icelandic_compatible_fonts():
         font_path = Path(font_dir)
         if font_path.exists() and font_path.is_dir():
             for font_file in font_path.rglob("*.[tT][tT][fF]"):
-                for char in characters_to_check:
-                    if check_font_supports_char(font_file, char):
-                        available_fonts.append(str(font_file))
-                        break  # No need to check other characters for this font
+                # Check if font supports ALL required characters
+                if all(
+                    check_font_supports_char(font_file, char)
+                    for char in characters_to_check
+                ):
+                    available_fonts.append(str(font_file))
 
     logger.info("Found %d Icelandic-compatible fonts.", len(available_fonts))
 
-    return available_fonts
+    return tuple(available_fonts)
 
 
 def _normalize_range(
@@ -365,6 +403,11 @@ def generate_single_text(
             if cfg.use_random_font_colors:
                 font_color = get_random_font_color(current_bg_color)
 
+            # Select random font size if enabled
+            current_font_size = font_size
+            if cfg.use_random_font_sizes:
+                current_font_size = random.randint(*cfg.font_size_range)
+
             if cfg.num_columns is not None and cfg.num_columns > 0:
                 num_columns = cfg.num_columns
             else:
@@ -373,13 +416,19 @@ def generate_single_text(
             if cfg.column_width is not None and cfg.column_width > 0:
                 column_width = cfg.column_width
             else:
-                column_width = random.randint(*column_width_range)
+                # column_width = random.randint(*column_width_range)
+
+                # take into account number of columns and gaps
+                total_gap = (num_columns - 1) * cfg.column_gap
+                max_column_width = (width - total_gap) // num_columns
+                min_column_width = min(column_width_range[0], max_column_width)
+                column_width = random.randint(min_column_width, max_column_width)
 
             image, fitted_text, paragraph_bboxes = create_image_with_text(
                 remaining_text,
                 image_size=(width, height),
                 alignment=alignment,
-                font_size=font_size,
+                font_size=current_font_size,
                 font_path=current_font_path,
                 bg_color=current_bg_color,
                 font_color=font_color,
@@ -414,7 +463,7 @@ def generate_single_text(
                     font_path=current_font_path,
                     bg_color=current_bg_color,
                     font_color=font_color,
-                    font_size=font_size,
+                    font_size=current_font_size,
                     image_width=width,
                     image_height=height,
                     image_dpi=dpi,
@@ -433,10 +482,34 @@ def generate_single_text(
     return images, len(text_chunks)
 
 
+def _save_batch_to_disk(
+    new_data: dict,
+    batch_dir: Path,
+    batch_idx: int,
+) -> str:
+    """
+    Save a batch of images to disk and return the path.
+
+    Args:
+        new_data: Dictionary containing the batch data
+        batch_dir: Directory to save batches
+        batch_idx: Index of the current batch
+
+    Returns:
+        str: Path to the saved batch
+    """
+    batch_path = batch_dir / f"batch_{batch_idx:04d}"
+    batch_ds = Dataset.from_dict(dict(new_data)).cast_column("image", Image())
+    batch_ds.save_to_disk(str(batch_path))
+    return str(batch_path)
+
+
 def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     """
     Generates a new dataset with images and corresponding text,
     handling text overflow by creating multiple images.
+    Uses batch processing to avoid OOM by flushing to disk periodically.
+
     Args:
         texts (list of str): List of text entries to convert to images
         cfg (DataConfig): Configuration for image generation
@@ -451,30 +524,40 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
 
     available_fonts = None
     if cfg.use_random_fonts:
-        available_fonts = get_icelandic_compatible_fonts()
+        available_fonts = get_icelandic_compatible_fonts(cfg.font_path)
 
     column_range = _normalize_range(cfg.min_num_columns, cfg.max_num_columns, minimum=1)
     column_width_range = _normalize_range(
         cfg.min_column_width, cfg.max_column_width, minimum=1
     )
+    font_size_range = _normalize_range(cfg.min_font_size, cfg.max_font_size, minimum=1)
 
     generation_cfg = GenerationConfig(
         **asdict(cfg),
         available_fonts=available_fonts,
         column_range=column_range,
         column_width_range=column_width_range,
+        font_size_range=font_size_range,
     )
+
+    # Batch processing setup to avoid OOM
+    batch_size = cfg.batch_size
+    batch_dir = Path(cfg.output_path) / "_batches"
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    batch_datasets: list[str] = []
 
     new_data: defaultdict[str, list] = defaultdict(list)
     total_splits = 0
     split_texts = 0
+    batch_idx = 0
 
     # Use ProcessPoolExecutor for true parallel processing (bypass GIL)
-    # Use physical cores for CPU-bound tasks
-    max_workers = min(psutil.cpu_count(logical=False) or 4, len(texts[:num_examples]))
+    # Use configured max_workers (default 1 for sequential execution to avoid OOM)
+    max_workers = min(cfg.max_workers, len(texts[:num_examples]))
     logger.info(
-        "Using %d parallel workers (physical cores) for image generation.",
+        "Using %d parallel workers for image generation (batch_size=%d).",
         max_workers,
+        batch_size,
     )
 
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -514,20 +597,58 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     )
                     new_data["paragraph_bboxes"].append(image_data.paragraph_bboxes)
                     new_data["transformation"].append(image_data.transformation)
+
+                # Flush batch to disk when threshold reached to avoid OOM
+                if len(new_data["image"]) >= batch_size:
+                    batch_path = _save_batch_to_disk(new_data, batch_dir, batch_idx)
+                    batch_datasets.append(batch_path)
+                    logger.info(
+                        "Saved batch %d with %d images to disk",
+                        batch_idx,
+                        len(new_data["image"]),
+                    )
+                    batch_idx += 1
+                    new_data = defaultdict(list)
+                    gc.collect()  # Force garbage collection to free memory
+
             except (OSError, ValueError, RuntimeError) as e:
                 logger.error("Error processing text: %s", e)
                 continue
 
+    # Save any remaining data in the final batch
+    if new_data["image"]:
+        batch_path = _save_batch_to_disk(new_data, batch_dir, batch_idx)
+        batch_datasets.append(batch_path)
+        logger.info(
+            "Saved final batch %d with %d images to disk",
+            batch_idx,
+            len(new_data["image"]),
+        )
+        del new_data
+        gc.collect()
+
     logger.info(
-        "Split %d long texts into multiple chunks, in total generating %d images from %d.",
+        "Split %d long texts into multiple chunks, generating %d batches.",
         split_texts,
-        total_splits,
-        len(texts),
+        len(batch_datasets),
     )
 
-    # Create a new Hugging Face Dataset
-    image_dataset = Dataset.from_dict(new_data).cast_column("image", Image())
-    return image_dataset
+    # Concatenate all batches into final dataset
+    if not batch_datasets:
+        logger.warning("No images were generated.")
+        return Dataset.from_dict({cfg.text_column: [], "image": []}).cast_column(
+            "image", Image()
+        )
+
+    logger.info("Concatenating %d batches into final dataset...", len(batch_datasets))
+    all_datasets = [load_from_disk(path) for path in batch_datasets]
+    final_dataset = concatenate_datasets(all_datasets)
+
+    # Clean up batch files
+    logger.info("Cleaning up temporary batch files...")
+    shutil.rmtree(batch_dir)
+
+    return final_dataset
 
 
 def display_sample(dataset: dict) -> None:
