@@ -31,6 +31,12 @@ class WrappedParagraph:
 
 
 @dataclass
+class WrapResult:
+    paragraphs: list[WrappedParagraph]
+    has_overflow: bool
+
+
+@dataclass
 class LinePlacement:
     text: str
     paragraph_index: int | None
@@ -45,11 +51,16 @@ def wrap_text(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     max_width: int,
     tab_width: int = 4,
-) -> list[WrappedParagraph]:
-    """Wrap each paragraph to fit within the given width."""
+) -> WrapResult:
+    """Wrap each paragraph to fit within the given width.
+
+    Returns:
+        WrapResult containing wrapped paragraphs and overflow flag
+    """
 
     paragraphs = text.split("\n")
     wrapped_paragraphs: list[WrappedParagraph] = []
+    has_overflow = False
 
     for paragraph in paragraphs:
         stripped_paragraph = paragraph.strip()
@@ -97,6 +108,8 @@ def wrap_text(
                 )
                 bbox = draw.textbbox((0, 0), test_line, font=font)
                 if bbox[2] - bbox[0] > max_width:
+                    # Word is too long to fit on a line - mark as overflow
+                    has_overflow = True
                     paragraph_lines.append(
                         (leading_whitespace if is_first_line else "") + word
                     )
@@ -114,7 +127,7 @@ def wrap_text(
             )
         )
 
-    return wrapped_paragraphs
+    return WrapResult(paragraphs=wrapped_paragraphs, has_overflow=has_overflow)
 
 
 def arrange_lines_in_columns(
@@ -230,32 +243,51 @@ def create_image_with_text(
     usable_width = max(1, int(scaled_image_size[0] * max_width_ratio))
     num_columns = max(1, num_columns)
     column_gap = max(0, column_gap)
-    total_gap = column_gap * (num_columns - 1)
-    if usable_width - total_gap <= 0:
-        num_columns = 1
-        column_gap = 0
-        total_gap = 0
 
-    max_available_width = max(1, usable_width - total_gap)
-    if max_available_width < num_columns:
-        num_columns = 1
-        column_gap = 0
-        total_gap = 0
-        max_available_width = max(1, usable_width)
-    if column_width is not None:
-        requested_width = max(1, column_width)
-        resolved_column_width = min(requested_width, max_available_width)
-        if resolved_column_width * num_columns > max_available_width:
+    # Retry loop: reduce columns if words don't fit
+    wrapped_paragraphs = None
+    has_overflow = True
+    while has_overflow and num_columns >= 1:
+        total_gap = column_gap * (num_columns - 1)
+        if usable_width - total_gap <= 0:
+            num_columns = 1
+            column_gap = 0
+            total_gap = 0
+
+        max_available_width = max(1, usable_width - total_gap)
+        if max_available_width < num_columns:
+            num_columns = 1
+            column_gap = 0
+            total_gap = 0
+            max_available_width = max(1, usable_width)
+        if column_width is not None:
+            requested_width = max(1, column_width)
+            resolved_column_width = min(requested_width, max_available_width)
+            if resolved_column_width * num_columns > max_available_width:
+                resolved_column_width = max(1, max_available_width // num_columns)
+        else:
             resolved_column_width = max(1, max_available_width // num_columns)
-    else:
-        resolved_column_width = max(1, max_available_width // num_columns)
 
-    resolved_column_width = max(1, resolved_column_width)
-    column_width = resolved_column_width
+        resolved_column_width = max(1, resolved_column_width)
+        current_column_width = resolved_column_width
+
+        # Try wrapping with current column configuration
+        wrap_result = wrap_text(draw, text, font, current_column_width, tab_width)
+        wrapped_paragraphs = wrap_result.paragraphs
+        has_overflow = wrap_result.has_overflow
+
+        # If overflow detected and we can reduce columns, try again
+        if has_overflow and num_columns > 1:
+            num_columns -= 1
+        else:
+            # Either no overflow or we're at minimum columns (1)
+            break
+
+    # Final column configuration after retry loop
+    column_width = current_column_width
+    total_gap = column_gap * (num_columns - 1)
     block_width = column_width * num_columns + total_gap
     margin_x = max(0, (scaled_image_size[0] - block_width) // 2)
-
-    wrapped_paragraphs = wrap_text(draw, text, font, column_width, tab_width)
 
     line_height = (
         draw.textbbox((0, 0), "Ag", font=font)[3]
