@@ -32,6 +32,7 @@ from tqdm import tqdm
 from rich.logging import RichHandler
 from PIL import Image as PILImage
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from PIL import ImageColor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -192,23 +193,64 @@ def get_random_background_color():
     return (r, g, b)
 
 
-def get_random_font_color(bg_color, contrast_threshold=100):
-    """Generate a random font color that contrasts with the background color."""
+def get_random_font_color(
+    bg_color: tuple[int, int, int] | str, contrast_threshold: float = 3.5
+) -> tuple[int, int, int]:
+    """Generate a random font color that contrasts with the background color.
 
-    def luminance(color):
+    Uses WCAG 2.1 contrast ratio guidelines for better readability.
+
+    Args:
+        bg_color: Background color as RGB tuple or color name string
+        contrast_threshold: Minimum contrast ratio (WCAG recommends 4.5 for normal text, we use 3.5 here to make it more challenging)
+
+    Returns:
+        RGB tuple representing the font color
+    """
+
+    def luminance(color: tuple[int, int, int]) -> float:
+        """Calculate relative luminance per WCAG 2.1 specification."""
         r, g, b = color
-        return 0.299 * r + 0.587 * g + 0.114 * b
+        # Normalize to 0-1 range
+        r, g, b = r / 255.0, g / 255.0, b / 255.0
+        # Apply gamma correction
+        r = r / 12.92 if r <= 0.03928 else ((r + 0.055) / 1.055) ** 2.4
+        g = g / 12.92 if g <= 0.03928 else ((g + 0.055) / 1.055) ** 2.4
+        b = b / 12.92 if b <= 0.03928 else ((b + 0.055) / 1.055) ** 2.4
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    def contrast_ratio(lum1: float, lum2: float) -> float:
+        """Calculate contrast ratio between two luminance values."""
+        lighter = max(lum1, lum2)
+        darker = min(lum1, lum2)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    # Convert bg_color to RGB tuple if it's a string
+    if isinstance(bg_color, str):
+        bg_color = ImageColor.getrgb(bg_color)
 
     bg_lum = luminance(bg_color)
 
-    while True:
+    # Try a few common high-contrast options first
+    candidates = [(0, 0, 0), (255, 255, 255), (50, 50, 50), (230, 230, 230)]
+    for font_color in candidates:
+        font_lum = luminance(font_color)
+        if contrast_ratio(bg_lum, font_lum) >= contrast_threshold:
+            return font_color
+
+    # Fall back to random generation with timeout
+    max_attempts = 100
+    for _ in range(max_attempts):
         r = random.randint(0, 255)
         g = random.randint(0, 255)
         b = random.randint(0, 255)
         font_color = (r, g, b)
         font_lum = luminance(font_color)
-        if abs(bg_lum - font_lum) >= contrast_threshold:
+        if contrast_ratio(bg_lum, font_lum) >= contrast_threshold:
             return font_color
+
+    # If no suitable color found, return black or white based on background luminance
+    return (0, 0, 0) if bg_lum > 0.5 else (255, 255, 255)
 
 
 def split_long_text(text: str, max_length: int) -> list[str]:
