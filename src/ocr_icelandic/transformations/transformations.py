@@ -377,12 +377,12 @@ TRANSFORMATION_CONFIG = {
             "probability": 0.2,
         },
         "textured_stains": {"function": textured_stains, "probability": 0.2},
+        "tight_crop": {"function": tight_crop, "probability": 0.25},
     },
     "perspective": {
         "rotate": {"function": rotate, "probability": 0.6},
-        "skew": {"function": skew, "probability": 0.4},
-        "perspective": {"function": perspective, "probability": 0.3},
-        "tight_crop": {"function": tight_crop, "probability": 0.5},
+        "skew": {"function": skew, "probability": 0.1},
+        "perspective": {"function": perspective, "probability": 0.5},
     },
     "postprocessing": {
         "light_reflection": {"function": light_reflection, "probability": 0.3},
