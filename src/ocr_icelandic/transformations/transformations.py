@@ -366,6 +366,44 @@ def shadow_overlay(
     )
 
 
+def shadow_gradient(
+    image: Image.Image,
+    bg_color: str | tuple[int, int, int],
+    paragraph_bboxes: list[dict] | None = None,
+) -> tuple[Image.Image, dict, list[dict]]:
+    """Apply a shadow gradient overlay to simulate lighting effects."""
+    paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
+
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+
+    width, height = image.size
+
+    # Create gradient
+    gradient = Image.new("L", (1, height), color=0xFF)
+    gradient_opacity = random.uniform(0.3, 0.7)
+    for y in range(height):
+        # Gradient from transparent to semi-transparent black
+        gradient.putpixel((0, y), int(255 * (y / height) * gradient_opacity))
+    alpha_gradient = gradient.resize((width, height))
+
+    # Create shadow overlay
+    shadow_overlay = Image.new("RGBA", (width, height), color=(0, 0, 0, 0))
+    shadow_overlay.putalpha(alpha_gradient)
+
+    # Composite with original image
+    image = Image.alpha_composite(image, shadow_overlay)
+
+    return (
+        image,
+        {
+            "transformation": "shadow_gradient",
+            "gradient_opacity": round(gradient_opacity, 2),
+        },
+        paragraph_bboxes_copy,
+    )
+
+
 # Transformation categories with their functions and default probabilities
 TRANSFORMATION_CONFIG = {
     "content": {
@@ -387,7 +425,63 @@ TRANSFORMATION_CONFIG = {
     "postprocessing": {
         "light_reflection": {"function": light_reflection, "probability": 0.3},
         "shadow_overlay": {"function": shadow_overlay, "probability": 0.4},
+        "shadow_gradient": {"function": shadow_gradient, "probability": 0.7},
     },
+}
+
+# Pipeline configurations for different scenarios
+PIPELINE_NO_BACKGROUND_PROBABILITIES = {
+    # Content transformations - default probabilities
+    "blur": 0.3,
+    "ink_splashes": 0.2,
+    "dusty_paper": 0.3,
+    "reverse_bleed_through": 0.2,
+    "textured_stains": 0.2,
+    "tight_crop": 0.25,
+    # Perspective transformations - default probabilities
+    "rotate": 0.6,
+    "skew": 0.1,
+    "perspective": 0.5,
+    # Postprocessing transformations - reduced probabilities for no background
+    "light_reflection": 0.15,  # Reduced from 0.3
+    "shadow_overlay": 0.2,  # Reduced from 0.4
+    "shadow_gradient": 0.35,  # Reduced from 0.7
+}
+
+PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES = {
+    # Content transformations - default probabilities
+    "blur": 0.3,
+    "ink_splashes": 0.2,
+    "dusty_paper": 0.3,
+    "reverse_bleed_through": 0.2,
+    "textured_stains": 0.2,
+    "tight_crop": 0.25,
+    # Perspective transformations - default probabilities
+    "rotate": 0.6,
+    "skew": 0.1,
+    "perspective": 0.5,
+    # Postprocessing transformations - default probabilities
+    "light_reflection": 0.3,
+    "shadow_overlay": 0.4,
+    "shadow_gradient": 0.7,
+}
+
+PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES = {
+    # Content transformations - default probabilities
+    "blur": 0.3,
+    "ink_splashes": 0.2,
+    "dusty_paper": 0.3,
+    "reverse_bleed_through": 0.2,
+    "textured_stains": 0.2,
+    "tight_crop": 0.25,
+    # Perspective transformations - default probabilities
+    "rotate": 0.6,
+    "skew": 0.1,
+    "perspective": 0.5,
+    # Postprocessing transformations - exclude light_reflection and shadow_overlay
+    "light_reflection": 0.0,  # Disabled for distant backgrounds
+    "shadow_overlay": 0.0,  # Disabled for distant backgrounds
+    "shadow_gradient": 0.7,  # Keep gradient as it's more subtle
 }
 
 
@@ -421,6 +515,71 @@ def _select_transformations_by_probability(
     return selected
 
 
+def _get_pipeline_no_background() -> list:
+    """
+    Pipeline 1: No photo background
+    Uses all transformations with reduced postprocessing probabilities.
+
+    Returns:
+        List of transformation functions to apply
+    """
+    transformations = []
+
+    # Select from all categories using the no-background pipeline probabilities
+    for category_name, category_config in TRANSFORMATION_CONFIG.items():
+        transformations.extend(
+            _select_transformations_by_probability(
+                category_config, PIPELINE_NO_BACKGROUND_PROBABILITIES
+            )
+        )
+
+    return transformations
+
+
+def _get_pipeline_background_with_shadow() -> list:
+    """
+    Pipeline 2: Photo background with shadow (e.g., desk surface)
+    Uses all transformations with default probabilities.
+    Shadows and light reflections will cast on the close background.
+
+    Returns:
+        List of transformation functions to apply
+    """
+    transformations = []
+
+    # Select from all categories using default probabilities
+    for category_name, category_config in TRANSFORMATION_CONFIG.items():
+        transformations.extend(
+            _select_transformations_by_probability(
+                category_config, PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES
+            )
+        )
+
+    return transformations
+
+
+def _get_pipeline_background_no_shadow() -> list:
+    """
+    Pipeline 3: Photo background without shadow (e.g., distant landscape)
+    Uses all transformations except light_reflection and shadow_overlay.
+    Distant backgrounds should not receive document shadows or light reflections.
+
+    Returns:
+        List of transformation functions to apply
+    """
+    transformations = []
+
+    # Select from all categories, with light_reflection and shadow_overlay disabled
+    for category_name, category_config in TRANSFORMATION_CONFIG.items():
+        transformations.extend(
+            _select_transformations_by_probability(
+                category_config, PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES
+            )
+        )
+
+    return transformations
+
+
 def apply_random_transformation(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
@@ -430,76 +589,51 @@ def apply_random_transformation(
     probability_overrides: dict | None = None,
 ) -> tuple[Image.Image, list[dict], list[dict]]:
     """
-    Apply random transformations to an image.
+    Apply random transformations to an image using one of three hard-coded pipelines.
+
+    Pipeline selection logic:
+    1. No background: All transformations with reduced postprocessing probabilities
+    2. Background with shadow: All transformations with default probabilities
+    3. Background without shadow: All transformations except light_reflection and shadow_overlay
 
     Args:
         image: Input RGBA image
-        bg_color: Background color (kept for API compatibility, passed to transformations but not used)
+        bg_color: Background color (kept for API compatibility, passed to transformations)
         paragraph_bboxes: Optional bounding boxes to transform
         use_background: Whether a background image will be used
         background_has_shadow: If True, background receives shadows (close background);
                                if False, background doesn't receive shadows (distant background)
         probability_overrides: Optional dict to override transformation probabilities
-                              e.g., {"blur": 0.5, "rotate": 0.8}
+                              (only used if custom behavior needed beyond the 3 pipelines)
 
     Returns:
         Tuple of (transformed RGBA image, transformation metadata, transformed bboxes)
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    transformations_to_apply = []
-    if use_background:
-        # Two different pipelines based on background type
-        if background_has_shadow:
-            # Close background (e.g., desk) - all transformations apply
-            transformations_to_apply.extend(
-                _select_transformations_by_probability(
-                    TRANSFORMATION_CONFIG["content"], probability_overrides
-                )
-            )
-            transformations_to_apply.extend(
-                _select_transformations_by_probability(
-                    TRANSFORMATION_CONFIG["perspective"], probability_overrides
-                )
-            )
-            transformations_to_apply.extend(
-                _select_transformations_by_probability(
-                    TRANSFORMATION_CONFIG["postprocessing"], probability_overrides
-                )
-            )
-        else:
-            # Distant background (e.g., landscape)
-            # No shadows or light reflections on the background
-            transformations_to_apply.extend(
-                _select_transformations_by_probability(
-                    TRANSFORMATION_CONFIG["content"], probability_overrides
-                )
-            )
-            transformations_to_apply.extend(
-                _select_transformations_by_probability(
-                    TRANSFORMATION_CONFIG["perspective"], probability_overrides
-                )
-            )
-            # Skip shadow_overlay and light_reflection for distant backgrounds
-            # These effects shouldn't cast on distant backgrounds
+    # Select pipeline based on background configuration
+    if not use_background:
+        # Pipeline 1: No photo background
+        transformations_to_apply = _get_pipeline_no_background()
+    elif background_has_shadow:
+        # Pipeline 2: Photo background with shadow (e.g., desk)
+        transformations_to_apply = _get_pipeline_background_with_shadow()
     else:
-        # No background - use default behavior with all transformations
-        transformations_to_apply.extend(
-            _select_transformations_by_probability(
-                TRANSFORMATION_CONFIG["content"], probability_overrides
-            )
-        )
-        transformations_to_apply.extend(
-            _select_transformations_by_probability(
-                TRANSFORMATION_CONFIG["perspective"], probability_overrides
-            )
-        )
-        transformations_to_apply.extend(
-            _select_transformations_by_probability(
-                TRANSFORMATION_CONFIG["postprocessing"], probability_overrides
-            )
-        )
+        # Pipeline 3: Photo background without shadow (e.g., landscape)
+        transformations_to_apply = _get_pipeline_background_no_shadow()
 
+    # Apply probability overrides if provided (for custom behavior)
+    if probability_overrides:
+        # Re-select transformations with custom probabilities
+        transformations_to_apply = []
+        for category_name, category_config in TRANSFORMATION_CONFIG.items():
+            transformations_to_apply.extend(
+                _select_transformations_by_probability(
+                    category_config, probability_overrides
+                )
+            )
+
+    # Apply selected transformations
     transformation_meta: list[dict] = []
     for transform in transformations_to_apply:
         image, meta, paragraph_bboxes_copy = transform(
