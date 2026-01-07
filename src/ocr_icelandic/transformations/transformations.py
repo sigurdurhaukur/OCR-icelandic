@@ -9,6 +9,7 @@ from ocr_icelandic.transformations.perspective import perspective
 from ocr_icelandic.transformations.rotate import rotate
 from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 from ocr_icelandic.transformations.skew import skew
+from ocr_icelandic.transformations.tight_crop import tight_crop
 
 
 def blur(
@@ -53,9 +54,12 @@ def ink_splashes(
 
         # Composite onto overlay
         overlay = Image.alpha_composite(overlay, splash)
-    combined = Image.alpha_composite(image.convert("RGBA"), overlay)
+    # Ensure image is RGBA
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+    combined = Image.alpha_composite(image, overlay)
     return (
-        combined.convert("RGB"),
+        combined,
         {
             "transformation": "ink_splashes",
             "splashes": splashes,
@@ -94,9 +98,12 @@ def textured_stains(
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     overlay.paste(stain, (pos_x, pos_y), stain)
 
-    combined = Image.alpha_composite(image.convert("RGBA"), overlay)
+    # Ensure image is RGBA
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+    combined = Image.alpha_composite(image, overlay)
     return (
-        combined.convert("RGB"),
+        combined,
         {
             "transformation": "coffee_stains",
             "position": (pos_x, pos_y),
@@ -118,7 +125,7 @@ def dusty_paper(
     grain_size = random.randint(1, 3)
     intensity = random.uniform(0.05, 0.15)
     noise = Image.effect_noise(image.size, grain_size * 10)
-    grainy_overlay = noise.convert("RGB")
+    grainy_overlay = noise.convert("RGBA" if image.mode == "RGBA" else "RGB")
     dusty_image = Image.blend(image, grainy_overlay, intensity)
     return (
         dusty_image,
@@ -204,8 +211,18 @@ def reverse_bleed_through(
     intensity = np.random.uniform(
         0.01, 0.04
     )  # Adjust intensity of the bleed-through effect
-    # Convert PIL image to numpy array
-    img_array = np.array(image)
+
+    # Store original alpha channel if present
+    has_alpha = image.mode == "RGBA"
+    if has_alpha:
+        alpha_channel = image.split()[3]
+
+    # Convert PIL image to numpy array (RGB only for processing)
+    if has_alpha:
+        img_rgb = image.convert("RGB")
+        img_array = np.array(img_rgb)
+    else:
+        img_array = np.array(image)
 
     # Flip the image horizontally
     flipped = cv2.flip(img_array, 1)
@@ -253,8 +270,15 @@ def reverse_bleed_through(
         )
 
     result = np.clip(result, 0, 255).astype(np.uint8)
+    result_image = Image.fromarray(result)
+
+    # Restore alpha channel if original had it
+    if has_alpha:
+        result_image = result_image.convert("RGBA")
+        result_image.putalpha(alpha_channel)
+
     return (
-        Image.fromarray(result),
+        result_image,
         {
             "transformation": "reverse_bleed_through",
             "intensity": round(intensity, 3),
@@ -330,7 +354,7 @@ def shadow_overlay(
     image = Image.alpha_composite(image, shadow)
 
     return (
-        image.convert("RGB"),
+        image,
         {
             "transformation": "shadow_overlay",
             "edge": edge,
@@ -358,6 +382,7 @@ TRANSFORMATION_CONFIG = {
         "rotate": {"function": rotate, "probability": 0.6},
         "skew": {"function": skew, "probability": 0.4},
         "perspective": {"function": perspective, "probability": 0.3},
+        "tight_crop": {"function": tight_crop, "probability": 0.5},
     },
     "postprocessing": {
         "light_reflection": {"function": light_reflection, "probability": 0.3},
@@ -408,8 +433,8 @@ def apply_random_transformation(
     Apply random transformations to an image.
 
     Args:
-        image: Input image
-        bg_color: Background color
+        image: Input RGBA image
+        bg_color: Background color (kept for API compatibility, passed to transformations but not used)
         paragraph_bboxes: Optional bounding boxes to transform
         use_background: Whether a background image will be used
         background_has_shadow: If True, background receives shadows (close background);
@@ -418,12 +443,11 @@ def apply_random_transformation(
                               e.g., {"blur": 0.5, "rotate": 0.8}
 
     Returns:
-        Tuple of (transformed image, transformation metadata, transformed bboxes)
+        Tuple of (transformed RGBA image, transformation metadata, transformed bboxes)
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     transformations_to_apply = []
-
     if use_background:
         # Two different pipelines based on background type
         if background_has_shadow:
@@ -483,4 +507,5 @@ def apply_random_transformation(
         )
         transformation_meta.append(meta)
 
+    # Return RGBA image directly (no RGB composite here)
     return image, transformation_meta, paragraph_bboxes_copy

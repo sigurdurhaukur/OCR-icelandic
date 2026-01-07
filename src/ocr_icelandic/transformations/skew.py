@@ -20,32 +20,29 @@ class SkewMeta(TypedDict):
     target_size: tuple[int, int]
 
 
-def _skew_within_bounds(
-    image: Image.Image, bg_color: str | tuple[int, int, int], dx: float
-) -> tuple[Image.Image, SkewMeta]:
+def _skew_within_bounds(image: Image.Image, dx: float) -> tuple[Image.Image, SkewMeta]:
     width, height = image.size
 
     # Calculate the expanded width after skew
     max_shift = abs(dx * height)
 
-    # Create large canvas
+    # Create large canvas with transparent background
     pad = int(max_shift)
     canvas_width = width + pad * 2
-    canvas = Image.new("RGB", (canvas_width, height), bg_color)
-    canvas.paste(image, (pad, 0))
+    canvas = Image.new("RGBA", (canvas_width, height), (0, 0, 0, 0))
+    canvas.paste(image, (pad, 0), image if image.mode == "RGBA" else None)
 
-    # Apply skew
+    # Apply skew with transparent fill
     matrix = (1, dx, 0, 0, 1, 0)
     skewed = canvas.transform(
         canvas.size,
         Image.Transform.AFFINE,
         matrix,
         resample=Image.Resampling.BICUBIC,
-        fillcolor=bg_color,
+        fillcolor=(0, 0, 0, 0),
     )
 
     # Crop to remove excess area introduced by skew
-
     if dx > 0:
         crop_box = (0, 0, canvas_width - int(dx * height), height)
         cropped = skewed.crop(crop_box)
@@ -55,10 +52,14 @@ def _skew_within_bounds(
 
     # Paste centered on a rectangular canvas to scale back to original size
     canvas_max_side = max(cropped.width, cropped.height)
-    canvas_for_resize = Image.new("RGB", (canvas_max_side, canvas_max_side), bg_color)
+    canvas_for_resize = Image.new(
+        "RGBA", (canvas_max_side, canvas_max_side), (0, 0, 0, 0)
+    )
     left = canvas_max_side // 2 - cropped.width // 2
     top = canvas_max_side // 2 - cropped.height // 2
-    canvas_for_resize.paste(cropped, (left, top))
+    canvas_for_resize.paste(
+        cropped, (left, top), cropped if cropped.mode == "RGBA" else None
+    )
 
     final_image = canvas_for_resize.resize((width, height), Image.Resampling.BICUBIC)
 
@@ -151,10 +152,16 @@ def skew(
     bg_color: str | tuple[int, int, int],
     paragraph_bboxes: list[dict] | None = None,
 ) -> tuple[Image.Image, dict, list[dict]]:
+    """
+    Apply skew transformation with transparent background.
+
+    Note: bg_color parameter is kept for API compatibility but not used.
+    The transformation uses transparent fills to preserve alpha channel.
+    """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     dx = random.uniform(-0.2, 0.2)
-    skewed, skew_meta = _skew_within_bounds(image, bg_color, dx)
+    skewed, skew_meta = _skew_within_bounds(image, dx)
     transformed_bboxes = _transform_paragraph_bboxes_for_skew(
         paragraph_bboxes_copy, skew_meta
     )
