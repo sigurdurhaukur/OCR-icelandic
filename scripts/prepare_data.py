@@ -20,7 +20,13 @@ from ocr_icelandic.fonts import (
     sync_google_fonts,
 )
 from ocr_icelandic.transformations import apply_random_transformation
-from ocr_icelandic.utils import create_image_with_text
+from ocr_icelandic.utils import (
+    _visualise_bboxes,
+    apply_background_image,
+    create_image_with_text,
+    discover_backgrounds,
+    discover_paper_textures,
+)
 from omegaconf import OmegaConf
 from tqdm import tqdm
 from rich.logging import RichHandler
@@ -45,7 +51,7 @@ class DataConfig:
     data_directory: str = "parla"  # Subdirectory or config name in the dataset
     split: str = "train"  # Which split to use from the dataset
     max_length: int = 512
-    max_entries: int = 10
+    max_entries: int = 2
     show_sample: bool = False  # Whether to show a sample image after creation
     image_width: int = 512
     image_height: int = 512
@@ -67,6 +73,11 @@ class DataConfig:
     use_random_fonts: bool = True  # Whether to use random fonts
     use_random_backgrounds: bool = True  # Whether to use random background colors
     google_fonts_directory: str = "./google_fonts"  # Directory to store Google Fonts
+    use_paper_textures: bool = True  # Whether to use paper textures from assets/papers
+    paper_textures_dir: str = "assets/papers"  # Directory containing paper texture images
+    use_background_images: bool = True  # Whether to use background images
+    backgrounds_dir: str = "assets/backgrounds"  # Directory containing background images
+    background_image_probability: float = 0.5  # Probability of using a background image
     max_text_length: int = 2000  # Maximum characters per text before splitting
     column_gap: int = 20  # Horizontal gap in pixels between columns
     num_columns: int | None = (
@@ -87,6 +98,9 @@ class GenerationConfig(DataConfig):
     column_range: tuple[int, int] = (1, 1)
     column_width_range: tuple[int, int] = (100, 512)
     available_fonts: list[str] | None = None
+    available_paper_textures: list[str] | None = None
+    available_no_shadow_backgrounds: list[str] | None = None
+    available_with_shadow_backgrounds: list[str] | None = None
 
 
 @dataclass
@@ -242,6 +256,11 @@ def generate_single_text(
             if cfg.use_random_backgrounds:
                 current_bg_color = get_random_background_color()
 
+            # Select random paper texture if enabled
+            paper_texture_path = None
+            if cfg.use_paper_textures and cfg.available_paper_textures:
+                paper_texture_path = random.choice(cfg.available_paper_textures)
+
             # Select random font color if enabled
             if cfg.use_random_font_colors:
                 font_color = get_random_font_color(current_bg_color)
@@ -269,15 +288,52 @@ def generate_single_text(
                 num_columns=num_columns,
                 column_gap=cfg.column_gap,
                 column_width=column_width,
+                paper_texture_path=paper_texture_path,
             )
 
+            # Decide whether to use a background image
+            use_background = False
+            background_has_shadow = False
+            background_path = None
+
+            if cfg.use_background_images and (cfg.available_no_shadow_backgrounds or cfg.available_with_shadow_backgrounds):
+                # Use background based on probability
+                if random.random() < cfg.background_image_probability:
+                    use_background = True
+                    # Choose background type (with/without shadow)
+                    all_backgrounds = []
+                    if cfg.available_with_shadow_backgrounds:
+                        all_backgrounds.extend([(bg, True) for bg in cfg.available_with_shadow_backgrounds])
+                    if cfg.available_no_shadow_backgrounds:
+                        all_backgrounds.extend([(bg, False) for bg in cfg.available_no_shadow_backgrounds])
+
+                    if all_backgrounds:
+                        background_path, background_has_shadow = random.choice(all_backgrounds)
+
+            # Apply transformations with the appropriate pipeline
             transformed_image, transformation_meta, transformed_paragraph_bboxes = (
                 apply_random_transformation(
                     image,
                     current_bg_color,
                     paragraph_bboxes=paragraph_bboxes,
+                    use_background=use_background,
+                    background_has_shadow=background_has_shadow,
                 )
             )
+
+            # Apply background image if selected
+            if use_background and background_path:
+                # Add small rotation for realism when placing on background
+                rotation_angle = random.uniform(-3, 3) if background_has_shadow else 0
+                transformed_image, bg_meta = apply_background_image(
+                    transformed_image,
+                    background_path,
+                    rotation_angle=rotation_angle,
+                )
+                # Add background metadata to transformations
+                transformation_meta.append({"transformation": "background", **bg_meta})
+
+            transformed_image = _visualise_bboxes(transformed_image, transformed_paragraph_bboxes, show_labels=False)
 
             if not fitted_text:
                 # No text could be fitted, break to avoid infinite loop
@@ -342,6 +398,22 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
             google_fonts_directory=cfg.google_fonts_directory
         )
 
+    available_paper_textures = None
+    if cfg.use_paper_textures:
+        available_paper_textures = discover_paper_textures(cfg.paper_textures_dir)
+        if available_paper_textures:
+            logger.info(f"Found {len(available_paper_textures)} paper textures in {cfg.paper_textures_dir}")
+        else:
+            logger.warning(f"No paper textures found in {cfg.paper_textures_dir}, falling back to solid colors")
+
+    available_no_shadow_backgrounds = []
+    available_with_shadow_backgrounds = []
+    if cfg.use_background_images:
+        available_no_shadow_backgrounds, available_with_shadow_backgrounds = discover_backgrounds(cfg.backgrounds_dir)
+        logger.info(f"Found {len(available_no_shadow_backgrounds)} no-shadow backgrounds and {len(available_with_shadow_backgrounds)} with-shadow backgrounds")
+        if not available_no_shadow_backgrounds and not available_with_shadow_backgrounds:
+            logger.warning(f"No backgrounds found in {cfg.backgrounds_dir}, will not use background images")
+
     column_range = _normalize_range(cfg.min_num_columns, cfg.max_num_columns, minimum=1)
     column_width_range = _normalize_range(
         cfg.min_column_width, cfg.max_column_width, minimum=1
@@ -350,6 +422,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     generation_cfg = GenerationConfig(
         **asdict(cfg),
         available_fonts=available_fonts,
+        available_paper_textures=available_paper_textures,
+        available_no_shadow_backgrounds=available_no_shadow_backgrounds,
+        available_with_shadow_backgrounds=available_with_shadow_backgrounds,
         column_range=column_range,
         column_width_range=column_width_range,
     )

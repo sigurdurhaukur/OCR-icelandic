@@ -34,6 +34,8 @@ OCR-icelandic/
 │       ├── skew.py                       # Skewing transformations
 │       └── shared.py                     # Shared utility functions
 │
+├── tests                                 # Tests for the src/ocr_icelandic module
+│
 ├── slurm/                                # SLURM job submission scripts
 │   ├── generate_synthetic_data.slurm     # Data generation job
 │   ├── train_smolVLM.slurm              # Model training job

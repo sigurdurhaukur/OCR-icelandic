@@ -1,5 +1,6 @@
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -21,6 +22,253 @@ def load_font(
         return ImageFont.truetype(font_path, font_size)
     except OSError:
         return ImageFont.load_default()
+
+
+def discover_paper_textures(papers_dir: str = "assets/papers") -> list[str]:
+    """
+    Discover paper texture files in the specified directory.
+
+    Args:
+        papers_dir: Path to directory containing paper texture images
+
+    Returns:
+        List of absolute paths to paper texture files
+    """
+    paper_paths = []
+    papers_path = Path(papers_dir)
+
+    if not papers_path.exists():
+        return paper_paths
+
+    # Look for common image formats
+    for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
+        paper_paths.extend(str(p) for p in papers_path.glob(ext))
+
+    return sorted(paper_paths)
+
+
+def apply_paper_texture(
+    image: Image.Image,
+    texture_path: str,
+    blend_alpha: float = 0.85,
+) -> Image.Image:
+    """
+    Apply a paper texture to an image background.
+
+    This function extracts the texture pattern from the source image and applies it
+    to the target background color, similar to GIMP's "Color to Alpha" approach.
+    It preserves the texture's shadows, highlights, and surface details while
+    replacing the base color.
+
+    Args:
+        image: Base image to apply texture to (with desired background color)
+        texture_path: Path to paper texture image
+        blend_alpha: Alpha value for texture intensity (0.0-1.0, higher = more visible texture)
+
+    Returns:
+        Image with paper texture applied
+    """
+    try:
+        # Load the texture in RGB mode to preserve all detail
+        texture = Image.open(texture_path).convert("RGB")
+
+        # Resize or tile texture to match image size
+        img_width, img_height = image.size
+        tex_width, tex_height = texture.size
+
+        # If texture is smaller, tile it
+        if tex_width < img_width or tex_height < img_height:
+            # Calculate how many tiles we need
+            tiles_x = (img_width // tex_width) + 2
+            tiles_y = (img_height // tex_height) + 2
+
+            # Create tiled texture
+            tiled = Image.new("RGB", (tex_width * tiles_x, tex_height * tiles_y))
+            for i in range(tiles_x):
+                for j in range(tiles_y):
+                    tiled.paste(texture, (i * tex_width, j * tex_height))
+
+            texture = tiled
+
+        # Crop to exact size with random offset for variety
+        max_offset_x = max(0, texture.width - img_width)
+        max_offset_y = max(0, texture.height - img_height)
+        offset_x = random.randint(0, max_offset_x) if max_offset_x > 0 else 0
+        offset_y = random.randint(0, max_offset_y) if max_offset_y > 0 else 0
+
+        texture = texture.crop(
+            (offset_x, offset_y, offset_x + img_width, offset_y + img_height)
+        )
+
+        # Convert to numpy arrays for processing
+        import numpy as np
+
+        texture_array = np.array(texture, dtype=np.float32)
+        img_array = np.array(image, dtype=np.float32)
+
+        # Calculate the average color of the texture (its "base" color)
+        texture_mean = np.mean(texture_array, axis=(0, 1), keepdims=True)
+
+        # Extract luminance of the texture
+        # Using standard luminance weights for RGB
+        texture_luminance = (
+            0.299 * texture_array[:, :, 0]
+            + 0.587 * texture_array[:, :, 1]
+            + 0.114 * texture_array[:, :, 2]
+        )
+        mean_luminance = np.mean(texture_luminance)
+
+        # Calculate luminance variation factor for each pixel
+        # This represents how much darker/lighter each pixel is compared to average
+        luminance_factor = texture_luminance / (
+            mean_luminance + 1e-6
+        )  # Avoid division by zero
+
+        # Apply the luminance variation to the target background color
+        # This preserves shadows and highlights from the texture
+        for channel in range(3):
+            img_array[:, :, channel] = img_array[:, :, channel] * luminance_factor
+
+        # Mix the result with the original image based on blend_alpha
+        # This allows control over texture intensity
+        final_array = img_array * blend_alpha + np.array(image, dtype=np.float32) * (
+            1 - blend_alpha
+        )
+
+        # Clip values to valid range
+        final_array = np.clip(final_array, 0, 255).astype(np.uint8)
+
+        # Convert back to PIL Image
+        result = Image.fromarray(final_array, mode="RGB")
+
+        return result
+
+    except Exception as e:
+        # If texture loading fails, return original image
+        print(f"Warning: Failed to apply paper texture from {texture_path}: {e}")
+        return image
+
+
+def discover_backgrounds(
+    backgrounds_dir: str = "assets/backgrounds",
+) -> tuple[list[str], list[str]]:
+    """
+    Discover background images separated by shadow type.
+
+    Args:
+        backgrounds_dir: Path to directory containing background images
+
+    Returns:
+        Tuple of (no_shadow_backgrounds, with_shadow_backgrounds)
+    """
+    no_shadow_paths = []
+    with_shadow_paths = []
+
+    backgrounds_path = Path(backgrounds_dir)
+    if not backgrounds_path.exists():
+        return no_shadow_paths, with_shadow_paths
+
+    # Discover no_shadow backgrounds
+    no_shadow_dir = backgrounds_path / "no_shadow"
+    if no_shadow_dir.exists():
+        for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
+            no_shadow_paths.extend(str(p) for p in no_shadow_dir.rglob(ext))
+
+    # Discover with_shadow backgrounds
+    with_shadow_dir = backgrounds_path / "with_shadow"
+    if with_shadow_dir.exists():
+        for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
+            with_shadow_paths.extend(str(p) for p in with_shadow_dir.rglob(ext))
+
+    return sorted(no_shadow_paths), sorted(with_shadow_paths)
+
+
+def apply_background_image(
+    foreground: Image.Image,
+    background_path: str,
+    position: tuple[int, int] | None = None,
+    rotation_angle: float = 0.0,
+) -> tuple[Image.Image, dict]:
+    """
+    Composite a foreground image (paper with text) onto a background image.
+
+    Args:
+        foreground: The paper image with text
+        background_path: Path to background image
+        position: Optional (x, y) position to place the foreground. If None, places randomly.
+        rotation_angle: Rotation angle for the foreground paper (in degrees)
+
+    Returns:
+        Tuple of (composited image, metadata dict)
+    """
+    try:
+        # Load the background
+        background = Image.open(background_path).convert("RGBA")
+        bg_width, bg_height = background.size
+        fg_width, fg_height = foreground.size
+
+        # Convert foreground to RGBA if needed
+        if foreground.mode != "RGBA":
+            foreground = foreground.convert("RGBA")
+
+        # Apply rotation if specified
+        if rotation_angle != 0:
+            foreground = foreground.rotate(
+                rotation_angle,
+                expand=True,
+                fillcolor=(0, 0, 0, 0)  # Transparent fill
+            )
+            fg_width, fg_height = foreground.size
+
+        # Scale background if it's smaller than foreground
+        if bg_width < fg_width or bg_height < fg_height:
+            scale_factor = max(fg_width / bg_width, fg_height / bg_height) * 1.2
+            new_bg_width = int(bg_width * scale_factor)
+            new_bg_height = int(bg_height * scale_factor)
+            background = background.resize((new_bg_width, new_bg_height), Image.Resampling.BICUBIC)
+            bg_width, bg_height = background.size
+
+        # Determine position
+        if position is None:
+            # Random position ensuring the foreground fits
+            max_x = max(0, bg_width - fg_width)
+            max_y = max(0, bg_height - fg_height)
+            x = random.randint(0, max_x) if max_x > 0 else 0
+            y = random.randint(0, max_y) if max_y > 0 else 0
+            position = (x, y)
+
+        # Create composite
+        composite = background.copy()
+        composite.paste(foreground, position, foreground)
+
+        # Convert back to RGB
+        composite = composite.convert("RGB")
+
+        # Crop to original foreground size if background was scaled
+        if composite.size != foreground.size:
+            # Center crop
+            x_offset = (composite.width - foreground.width) // 2
+            y_offset = (composite.height - foreground.height) // 2
+            composite = composite.crop((
+                x_offset,
+                y_offset,
+                x_offset + foreground.width,
+                y_offset + foreground.height
+            ))
+
+        metadata = {
+            "background_path": background_path,
+            "position": position,
+            "rotation_angle": rotation_angle,
+            "background_size": (bg_width, bg_height),
+        }
+
+        return composite, metadata
+
+    except Exception as e:
+        print(f"Warning: Failed to apply background from {background_path}: {e}")
+        # Return original foreground if background application fails
+        return foreground.convert("RGB") if foreground.mode != "RGB" else foreground, {}
 
 
 @dataclass
@@ -194,6 +442,7 @@ def create_image_with_text(
     num_columns: int = 1,
     column_gap: int = 20,
     column_width: int | None = None,
+    paper_texture_path: str | None = None,
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -213,6 +462,7 @@ def create_image_with_text(
         num_columns: Number of columns to use when laying out text
         column_gap: Gap in pixels between columns
         column_width: Fixed pixel width for each column (None to auto-size)
+        paper_texture_path: Optional path to paper texture image to use as background
 
     Returns:
         tuple: (PIL Image object, string of text that actually fits in the image, paragraph bounding boxes)
@@ -228,15 +478,21 @@ def create_image_with_text(
     image.info["dpi"] = (dpi, dpi)
     draw = ImageDraw.Draw(image)
 
-    # add gaussian noice to the background to make it more realistic and less uniform
-    noise = Image.effect_noise(scaled_image_size, 10)
-    image = Image.blend(image, noise.convert("RGB"), 0.1)
-    draw = ImageDraw.Draw(image)
+    # Apply paper texture if provided
+    if paper_texture_path is not None:
+        # Apply texture preserving background color but adding paper surface details
+        image = apply_paper_texture(image, paper_texture_path, blend_alpha=0.9)
+        draw = ImageDraw.Draw(image)
+    else:
+        # add gaussian noice to the background to make it more realistic and less uniform
+        noise = Image.effect_noise(scaled_image_size, 10)
+        image = Image.blend(image, noise.convert("RGB"), 0.1)
+        draw = ImageDraw.Draw(image)
 
-    # add "dirt" texture to the background
-    dirt_texture = Image.effect_noise(scaled_image_size, 5)
-    image = Image.blend(image, dirt_texture.convert("RGB"), 0.05)
-    draw = ImageDraw.Draw(image)
+        # add "dirt" texture to the background
+        dirt_texture = Image.effect_noise(scaled_image_size, 5)
+        image = Image.blend(image, dirt_texture.convert("RGB"), 0.05)
+        draw = ImageDraw.Draw(image)
 
     font = load_font(font_path=font_path, font_size=scaled_font_size)
 

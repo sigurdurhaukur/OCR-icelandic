@@ -373,10 +373,9 @@ def apply_random_transformation(
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     transformations_to_apply = [
-        perspective
-        # *_get_random_subset(CONTENT_TRANSFORMATIONS),
-        # *_get_random_subset(PERSPECTIVE_TRANSFORMATIONS),
-        # *_get_random_subset(POSTPROCESSING_TRANSFORMATIONS),
+        *_get_random_subset(CONTENT_TRANSFORMATIONS),
+        *_get_random_subset(PERSPECTIVE_TRANSFORMATIONS),
+        *_get_random_subset(POSTPROCESSING_TRANSFORMATIONS),
     ]
 
     transformation_meta: list[dict] = []
