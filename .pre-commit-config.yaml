@@ -28,6 +28,14 @@ repos:
     -   id: pyupgrade
         args: [--py313-plus]
 
+-   repo: local
+    hooks:
+    -   id: compress-images
+        name: Compress images
+        entry: uv run --directory assets --frozen python compress_images.py
+        language: system
+        pass_filenames: false
+
 - repo: https://github.com/astral-sh/ruff-pre-commit
   rev: v0.14.8
   hooks:
