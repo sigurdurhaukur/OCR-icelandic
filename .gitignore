@@ -226,3 +226,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local outputs
+local_output/
