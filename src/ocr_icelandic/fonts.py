@@ -316,7 +316,9 @@ def get_compatible_fonts(
     cache_misses = 0
     fonts_found = 0
 
-    for font_dir in tqdm(font_dirs, desc=f"Scanning font directories ({language_code})"):
+    for font_dir in tqdm(
+        font_dirs, desc=f"Scanning font directories ({language_code})"
+    ):
         font_path = Path(font_dir)
         if not font_path.exists() or not font_path.is_dir():
             continue

@@ -226,7 +226,7 @@ class TestFontCompatibilityCache:
 
     def test_cache_initialization(self, temp_cache_dir):
         """Test cache initialization creates database."""
-        cache = FontCompatibilityCache(cache_dir=temp_cache_dir)
+        _ = FontCompatibilityCache(cache_dir=temp_cache_dir)
 
         db_path = Path(temp_cache_dir) / "font_compatibility.db"
         assert db_path.exists()

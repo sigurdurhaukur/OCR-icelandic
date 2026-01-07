@@ -106,9 +106,6 @@ def apply_paper_texture(
         texture_array = np.array(texture, dtype=np.float32)
         img_array = np.array(image, dtype=np.float32)
 
-        # Calculate the average color of the texture (its "base" color)
-        texture_mean = np.mean(texture_array, axis=(0, 1), keepdims=True)
-
         # Extract luminance of the texture
         # Using standard luminance weights for RGB
         texture_luminance = (

@@ -72,7 +72,7 @@ class DataConfig:
     )
     use_random_fonts: bool = True  # Whether to use random fonts
     use_random_backgrounds: bool = True  # Whether to use random background colors
-    google_fonts_directory: str = "./google_fonts"  # Directory to store Google Fonts
+    google_fonts_directory: str = "../google_fonts"  # Directory to store Google Fonts
     language_code: str = (
         "is"  # ISO 639-1 language code (e.g., "is" for Icelandic, "de" for German)
     )

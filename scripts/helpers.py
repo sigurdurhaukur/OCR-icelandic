@@ -1,5 +1,4 @@
 from dataclasses import asdict, dataclass, field
-from typing import Optional
 
 from transformers import TrainingArguments
 
