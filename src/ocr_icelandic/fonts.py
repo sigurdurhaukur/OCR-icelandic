@@ -213,38 +213,87 @@ def sync_google_fonts(api_key: str, google_fonts_dir: str) -> bool:
     return True
 
 
-def get_icelandic_compatible_fonts(google_fonts_directory: str | None = None):
+def get_compatible_fonts(
+    language_code: str,
+    use_cache: bool = True,
+    cache_dir: str = ".fontcache",
+    google_fonts_directory: str | None = None,
+) -> list[str]:
     """
-    Scan system and Google Fonts directories for fonts that support Icelandic characters.
+    Scan system and Google Fonts directories for fonts compatible with a language.
+
+    This function supports multiple languages via ISO 639-1 codes and uses SQLite
+    caching to avoid re-scanning fonts on subsequent runs. Cache entries are
+    automatically invalidated when font files are modified.
 
     Args:
-        google_fonts_directory: Optional path to Google Fonts directory to include in scan
+        language_code: ISO 639-1 (2-letter) or ISO 639-3 (3-letter) language code
+                      (e.g., "is" for Icelandic, "de" for German)
+        use_cache: Whether to use caching (default: True)
+        cache_dir: Directory to store cache database (default: ".fontcache")
+        google_fonts_directory: Optional path to Google Fonts directory to include
 
     Returns:
         List of absolute paths to compatible TTF font files
+
+    Raises:
+        NotImplementedError: If the language code is not supported
+
+    Example:
+        >>> # Get Icelandic-compatible fonts with caching
+        >>> fonts = get_compatible_fonts("is")
+        >>> len(fonts)
+        42
+
+        >>> # Get German fonts without caching
+        >>> fonts = get_compatible_fonts("de", use_cache=False)
+
+        >>> # Add custom language and get fonts
+        >>> from ocr_icelandic.language_support import LanguageRegistry, LanguageCharacterSet
+        >>> LanguageRegistry.add_custom_language(LanguageCharacterSet(
+        ...     iso_639_1="ja",
+        ...     iso_639_3="jpn",
+        ...     name_english="Japanese",
+        ...     name_native="日本語",
+        ...     special_characters="あいうえお"
+        ... ))
+        >>> fonts = get_compatible_fonts("ja")
     """
-    # load fonts from font directory
+    import time
+    from ocr_icelandic.font_cache import FontCompatibilityCache
+    from ocr_icelandic.language_support import LanguageRegistry
 
     random.seed(42)  # For reproducibility
 
-    # Check common font directories based on OS
-    current_os = sys.platform
+    # Get language character set (raises NotImplementedError if not supported)
+    language = LanguageRegistry.get_language(language_code)
+    characters_to_check = language.special_characters
 
+    logger.info(
+        f"Scanning for {language.name_english} ({language_code}) compatible fonts"
+    )
+    logger.info(f"Character set: {characters_to_check}")
+
+    # Initialize cache if enabled
+    cache = FontCompatibilityCache(cache_dir) if use_cache else None
+
+    # Determine font directories based on OS
+    current_os = sys.platform
     font_dirs = []
 
-    # macos
+    # macOS
     if current_os.startswith("darwin"):
         font_dirs = [
             "/System/Library/Fonts",
             "/System/Library/Fonts/Supplemental",
         ]
-    # linux
+    # Linux
     if current_os.startswith("linux"):
         font_dirs += [
             "/usr/share/fonts",
             "/usr/local/share/fonts",
         ]
-    # windows
+    # Windows
     if current_os.startswith("win"):
         font_dirs += [
             str(Path.home() / "AppData/Local/Microsoft/Windows/Fonts"),
@@ -261,17 +310,107 @@ def get_icelandic_compatible_fonts(google_fonts_directory: str | None = None):
 
     logger.info(f"Searching for fonts in directories: {font_dirs}")
 
+    start_time = time.time()
     available_fonts: list[str] = []
-    characters_to_check = "ÁáÐðÉéÍíÓóÚúÝýÞþÆæÖö"
-    for font_dir in tqdm(font_dirs, desc="Scanning font directories"):
-        font_path = Path(font_dir)
-        if font_path.exists() and font_path.is_dir():
-            for font_file in font_path.rglob("*.[tT][tT][fF]"):
-                for char in characters_to_check:
-                    if check_font_supports_char(font_file, char):
-                        available_fonts.append(str(font_file))
-                        break  # No need to check other characters for this font
+    cache_hits = 0
+    cache_misses = 0
+    fonts_found = 0
 
-    logger.info(f"Found {len(available_fonts)} Icelandic-compatible fonts.")
+    for font_dir in tqdm(font_dirs, desc=f"Scanning font directories ({language_code})"):
+        font_path = Path(font_dir)
+        if not font_path.exists() or not font_path.is_dir():
+            continue
+
+        for font_file in font_path.rglob("*.[tT][tT][fF]"):
+            fonts_found += 1
+            font_file_str = str(font_file)
+
+            # Check cache first if enabled
+            if cache:
+                cached_result = cache.get_cached_compatibility(
+                    font_file_str, language_code
+                )
+                if cached_result is not None:
+                    cache_hits += 1
+                    if cached_result:
+                        available_fonts.append(font_file_str)
+                    continue
+
+            # Cache miss - need to check the font
+            cache_misses += 1
+            is_compatible = False
+
+            # Check if font supports at least one character from the set
+            for char in characters_to_check:
+                if check_font_supports_char(font_file, char):
+                    is_compatible = True
+                    available_fonts.append(font_file_str)
+                    break
+
+            # Store result in cache
+            if cache:
+                cache.store_compatibility(
+                    font_file_str, language_code, characters_to_check, is_compatible
+                )
+
+    duration = time.time() - start_time
+
+    # Record scan statistics
+    if cache:
+        cache.record_scan(
+            scan_directory=", ".join(font_dirs),
+            language_code=language_code,
+            fonts_found=fonts_found,
+            compatible_fonts=len(available_fonts),
+            duration_seconds=duration,
+            cache_hits=cache_hits,
+            cache_misses=cache_misses,
+        )
+
+    logger.info(
+        f"Found {len(available_fonts)} {language.name_english}-compatible fonts "
+        f"in {duration:.2f}s"
+    )
+    if cache:
+        logger.info(f"Cache hits: {cache_hits}, Cache misses: {cache_misses}")
 
     return available_fonts
+
+
+def get_icelandic_compatible_fonts(google_fonts_directory: str | None = None):
+    """
+    Scan system and Google Fonts directories for fonts that support Icelandic characters.
+
+    .. deprecated:: 0.2.0
+        Use :func:`get_compatible_fonts` with language_code="is" instead.
+        This function is maintained for backward compatibility but will be removed
+        in a future version.
+
+    Args:
+        google_fonts_directory: Optional path to Google Fonts directory to include in scan
+
+    Returns:
+        List of absolute paths to compatible TTF font files
+
+    Example:
+        >>> # Old way (deprecated)
+        >>> fonts = get_icelandic_compatible_fonts()
+
+        >>> # New way (recommended)
+        >>> fonts = get_compatible_fonts("is")
+    """
+    import warnings
+
+    warnings.warn(
+        "get_icelandic_compatible_fonts() is deprecated. "
+        "Use get_compatible_fonts(language_code='is') instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
+    return get_compatible_fonts(
+        language_code="is",
+        use_cache=True,
+        cache_dir=".fontcache",
+        google_fonts_directory=google_fonts_directory,
+    )
