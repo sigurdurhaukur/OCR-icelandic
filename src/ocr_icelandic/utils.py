@@ -186,21 +186,25 @@ def discover_backgrounds(
 def apply_background_image(
     foreground: Image.Image,
     background_path: str,
+    paragraph_bboxes: list[dict] | None = None,
     position: tuple[int, int] | None = None,
-    rotation_angle: float = 0.0,
-) -> tuple[Image.Image, dict]:
+) -> tuple[Image.Image, dict, list[dict]]:
     """
     Composite a foreground image (paper with text) onto a background image.
 
     Args:
         foreground: The paper image with text
         background_path: Path to background image
-        position: Optional (x, y) position to place the foreground. If None, places randomly.
-        rotation_angle: Rotation angle for the foreground paper (in degrees)
+        paragraph_bboxes: Optional bounding boxes to transform
+        position: Optional (x, y) position to place the foreground. If None, centers it.
 
     Returns:
-        Tuple of (composited image, metadata dict)
+        Tuple of (composited image, metadata dict, transformed bboxes)
     """
+    from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
+
+    paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
+
     try:
         # Load the background
         background = Image.open(background_path).convert("RGBA")
@@ -211,30 +215,21 @@ def apply_background_image(
         if foreground.mode != "RGBA":
             foreground = foreground.convert("RGBA")
 
-        # Apply rotation if specified
-        if rotation_angle != 0:
-            foreground = foreground.rotate(
-                rotation_angle,
-                expand=True,
-                fillcolor=(0, 0, 0, 0)  # Transparent fill
-            )
-            fg_width, fg_height = foreground.size
-
         # Scale background if it's smaller than foreground
         if bg_width < fg_width or bg_height < fg_height:
             scale_factor = max(fg_width / bg_width, fg_height / bg_height) * 1.2
             new_bg_width = int(bg_width * scale_factor)
             new_bg_height = int(bg_height * scale_factor)
-            background = background.resize((new_bg_width, new_bg_height), Image.Resampling.BICUBIC)
+            background = background.resize(
+                (new_bg_width, new_bg_height), Image.Resampling.BICUBIC
+            )
             bg_width, bg_height = background.size
 
-        # Determine position
+        # Determine position (center by default, or use provided position)
         if position is None:
-            # Random position ensuring the foreground fits
-            max_x = max(0, bg_width - fg_width)
-            max_y = max(0, bg_height - fg_height)
-            x = random.randint(0, max_x) if max_x > 0 else 0
-            y = random.randint(0, max_y) if max_y > 0 else 0
+            # Center the paper on the background
+            x = (bg_width - fg_width) // 2
+            y = (bg_height - fg_height) // 2
             position = (x, y)
 
         # Create composite
@@ -244,31 +239,38 @@ def apply_background_image(
         # Convert back to RGB
         composite = composite.convert("RGB")
 
-        # Crop to original foreground size if background was scaled
-        if composite.size != foreground.size:
-            # Center crop
-            x_offset = (composite.width - foreground.width) // 2
-            y_offset = (composite.height - foreground.height) // 2
-            composite = composite.crop((
-                x_offset,
-                y_offset,
-                x_offset + foreground.width,
-                y_offset + foreground.height
-            ))
+        # Crop back to original foreground size, centered on the pasted paper
+        paste_x, paste_y = position
+        crop_x = paste_x
+        crop_y = paste_y
+
+        # Ensure crop stays within composite bounds
+        crop_x = max(0, min(crop_x, composite.width - fg_width))
+        crop_y = max(0, min(crop_y, composite.height - fg_height))
+
+        composite = composite.crop(
+            (crop_x, crop_y, crop_x + fg_width, crop_y + fg_height)
+        )
+
+        # Bounding boxes don't need adjustment since we cropped exactly where the paper was
+        # The paper is in the same relative position in the final image as it was in the original
 
         metadata = {
             "background_path": background_path,
             "position": position,
-            "rotation_angle": rotation_angle,
             "background_size": (bg_width, bg_height),
+            "crop_offset": (crop_x, crop_y),
         }
 
-        return composite, metadata
+        return composite, metadata, paragraph_bboxes_copy
 
     except Exception as e:
         print(f"Warning: Failed to apply background from {background_path}: {e}")
         # Return original foreground if background application fails
-        return foreground.convert("RGB") if foreground.mode != "RGB" else foreground, {}
+        rgb_foreground = (
+            foreground.convert("RGB") if foreground.mode != "RGB" else foreground
+        )
+        return rgb_foreground, {}, paragraph_bboxes_copy
 
 
 @dataclass
