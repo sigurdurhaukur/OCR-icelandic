@@ -18,7 +18,7 @@ python scripts/prepare_data.py \
     push_to_hub=True \
     hub_repo_id="Sigurdur/eng_synthetic_ocr_v2" \
     apply_random_transformations=False \
-    font_path="./icelandic_fonts" \
+    google_fonts_directory="./english_fonts" \
 
 Generating icelandic synthetic OCR dataset as an example:
 
@@ -32,9 +32,9 @@ python scripts/prepare_data.py \
     max_workers=1 \
     output_path="isl_synthetic_ocr_output_v3" \
     num_examples=2000 \
-    push_to_hub=true \
+    push_to_hub=True \
     hub_repo_id="Sigurdur/isl_synthetic_ocr_v3" \
-    apply_random_transformations=false \
+    apply_random_transformations=False \
     google_fonts_directory="./icelandic_fonts" \
 """
 

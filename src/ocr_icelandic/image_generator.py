@@ -104,7 +104,7 @@ def generate_single_text(
 def _resolve_random_settings(cfg: "GenerationConfig") -> dict:
     """Resolve all random settings for a single image."""
     settings = {
-        "font_path": cfg.font_path,
+        "font_path": "Not Set",
         "bg_color": cfg.img_background_color,
         "composite_bg_color": cfg.img_background_color,
         "font_color": cfg.font_color,

@@ -23,7 +23,7 @@ class DataConfig:
     # Image settings
     image_width: int = 512
     image_height: int = 512
-    image_dpi: int = 140  # Standard set by SmolDocling paper
+    image_dpi: int = 144  # Standard set by SmolDocling paper
     img_background_color: str = "white"
 
     # Font settings
