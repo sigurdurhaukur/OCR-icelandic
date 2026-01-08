@@ -1,8 +1,8 @@
-import math
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 
 def load_font(
@@ -20,8 +20,254 @@ def load_font(
     # Load a font
     try:
         return ImageFont.truetype(font_path, font_size)
-    except IOError:
+    except OSError:
         return ImageFont.load_default()
+
+
+def discover_paper_textures(papers_dir: str = "assets/papers") -> list[str]:
+    """
+    Discover paper texture files in the specified directory.
+
+    Args:
+        papers_dir: Path to directory containing paper texture images
+
+    Returns:
+        List of absolute paths to paper texture files
+    """
+    paper_paths = []
+    papers_path = Path(papers_dir)
+
+    if not papers_path.exists():
+        return paper_paths
+
+    # Look for common image formats
+    for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
+        paper_paths.extend(str(p) for p in papers_path.glob(ext))
+
+    return sorted(paper_paths)
+
+
+def apply_paper_texture(
+    image: Image.Image,
+    texture_path: str,
+    blend_alpha: float = 0.85,
+) -> Image.Image:
+    """
+    Apply a paper texture to an image background.
+
+    This function extracts the texture pattern from the source image and applies it
+    to the target background color, similar to GIMP's "Color to Alpha" approach.
+    It preserves the texture's shadows, highlights, and surface details while
+    replacing the base color.
+
+    Args:
+        image: Base image to apply texture to (with desired background color)
+        texture_path: Path to paper texture image
+        blend_alpha: Alpha value for texture intensity (0.0-1.0, higher = more visible texture)
+
+    Returns:
+        Image with paper texture applied
+    """
+    try:
+        # Load the texture in RGB mode to preserve all detail
+        texture = Image.open(texture_path).convert("RGB")
+
+        # Resize or tile texture to match image size
+        img_width, img_height = image.size
+        tex_width, tex_height = texture.size
+
+        # If texture is smaller, tile it
+        if tex_width < img_width or tex_height < img_height:
+            # Calculate how many tiles we need
+            tiles_x = (img_width // tex_width) + 2
+            tiles_y = (img_height // tex_height) + 2
+
+            # Create tiled texture
+            tiled = Image.new("RGB", (tex_width * tiles_x, tex_height * tiles_y))
+            for i in range(tiles_x):
+                for j in range(tiles_y):
+                    tiled.paste(texture, (i * tex_width, j * tex_height))
+
+            texture = tiled
+
+        # Crop to exact size with random offset for variety
+        max_offset_x = max(0, texture.width - img_width)
+        max_offset_y = max(0, texture.height - img_height)
+        offset_x = random.randint(0, max_offset_x) if max_offset_x > 0 else 0
+        offset_y = random.randint(0, max_offset_y) if max_offset_y > 0 else 0
+
+        texture = texture.crop(
+            (offset_x, offset_y, offset_x + img_width, offset_y + img_height)
+        )
+
+        # Convert to numpy arrays for processing
+        import numpy as np
+
+        texture_array = np.array(texture, dtype=np.float32)
+        img_array = np.array(image, dtype=np.float32)
+
+        # Extract luminance of the texture
+        # Using standard luminance weights for RGB
+        texture_luminance = (
+            0.299 * texture_array[:, :, 0]
+            + 0.587 * texture_array[:, :, 1]
+            + 0.114 * texture_array[:, :, 2]
+        )
+        mean_luminance = np.mean(texture_luminance)
+
+        # Calculate luminance variation factor for each pixel
+        # This represents how much darker/lighter each pixel is compared to average
+        luminance_factor = texture_luminance / (
+            mean_luminance + 1e-6
+        )  # Avoid division by zero
+
+        # Apply the luminance variation to the target background color
+        # This preserves shadows and highlights from the texture
+        for channel in range(3):
+            img_array[:, :, channel] = img_array[:, :, channel] * luminance_factor
+
+        # Mix the result with the original image based on blend_alpha
+        # This allows control over texture intensity
+        final_array = img_array * blend_alpha + np.array(image, dtype=np.float32) * (
+            1 - blend_alpha
+        )
+
+        # Clip values to valid range
+        final_array = np.clip(final_array, 0, 255).astype(np.uint8)
+
+        # Convert back to PIL Image
+        result = Image.fromarray(final_array, mode="RGB")
+
+        return result
+
+    except Exception as e:
+        # If texture loading fails, return original image
+        print(f"Warning: Failed to apply paper texture from {texture_path}: {e}")
+        return image
+
+
+def discover_backgrounds(
+    backgrounds_dir: str = "assets/backgrounds",
+) -> tuple[list[str], list[str]]:
+    """
+    Discover background images separated by shadow type.
+
+    Args:
+        backgrounds_dir: Path to directory containing background images
+
+    Returns:
+        Tuple of (no_shadow_backgrounds, with_shadow_backgrounds)
+    """
+    no_shadow_paths = []
+    with_shadow_paths = []
+
+    backgrounds_path = Path(backgrounds_dir)
+    if not backgrounds_path.exists():
+        return no_shadow_paths, with_shadow_paths
+
+    # Discover no_shadow backgrounds
+    no_shadow_dir = backgrounds_path / "no_shadow"
+    if no_shadow_dir.exists():
+        for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
+            no_shadow_paths.extend(str(p) for p in no_shadow_dir.rglob(ext))
+
+    # Discover with_shadow backgrounds
+    with_shadow_dir = backgrounds_path / "with_shadow"
+    if with_shadow_dir.exists():
+        for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
+            with_shadow_paths.extend(str(p) for p in with_shadow_dir.rglob(ext))
+
+    return sorted(no_shadow_paths), sorted(with_shadow_paths)
+
+
+def apply_background_image(
+    foreground: Image.Image,
+    background_path: str,
+    paragraph_bboxes: list[dict] | None = None,
+    position: tuple[int, int] | None = None,
+) -> tuple[Image.Image, dict, list[dict]]:
+    """
+    Composite a foreground image (paper with text) onto a background image.
+
+    Args:
+        foreground: The paper image with text
+        background_path: Path to background image
+        paragraph_bboxes: Optional bounding boxes to transform
+        position: Optional (x, y) position to place the foreground. If None, centers it.
+
+    Returns:
+        Tuple of (composited image, metadata dict, transformed bboxes)
+    """
+    from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
+
+    paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
+
+    try:
+        # Load the background
+        background = Image.open(background_path).convert("RGBA")
+        bg_width, bg_height = background.size
+        fg_width, fg_height = foreground.size
+
+        # Convert foreground to RGBA if needed
+        if foreground.mode != "RGBA":
+            foreground = foreground.convert("RGBA")
+
+        # Scale background if it's smaller than foreground
+        if bg_width < fg_width or bg_height < fg_height:
+            scale_factor = max(fg_width / bg_width, fg_height / bg_height) * 1.2
+            new_bg_width = int(bg_width * scale_factor)
+            new_bg_height = int(bg_height * scale_factor)
+            background = background.resize(
+                (new_bg_width, new_bg_height), Image.Resampling.BICUBIC
+            )
+            bg_width, bg_height = background.size
+
+        # Determine position (center by default, or use provided position)
+        if position is None:
+            # Center the paper on the background
+            x = (bg_width - fg_width) // 2
+            y = (bg_height - fg_height) // 2
+            position = (x, y)
+
+        # Create composite
+        composite = background.copy()
+        composite.paste(foreground, position, foreground)
+
+        # Convert back to RGB
+        composite = composite.convert("RGB")
+
+        # Crop back to original foreground size, centered on the pasted paper
+        paste_x, paste_y = position
+        crop_x = paste_x
+        crop_y = paste_y
+
+        # Ensure crop stays within composite bounds
+        crop_x = max(0, min(crop_x, composite.width - fg_width))
+        crop_y = max(0, min(crop_y, composite.height - fg_height))
+
+        composite = composite.crop(
+            (crop_x, crop_y, crop_x + fg_width, crop_y + fg_height)
+        )
+
+        # Bounding boxes don't need adjustment since we cropped exactly where the paper was
+        # The paper is in the same relative position in the final image as it was in the original
+
+        metadata = {
+            "background_path": background_path,
+            "position": position,
+            "background_size": (bg_width, bg_height),
+            "crop_offset": (crop_x, crop_y),
+        }
+
+        return composite, metadata, paragraph_bboxes_copy
+
+    except Exception as e:
+        print(f"Warning: Failed to apply background from {background_path}: {e}")
+        # Return original foreground if background application fails
+        rgb_foreground = (
+            foreground.convert("RGB") if foreground.mode != "RGB" else foreground
+        )
+        return rgb_foreground, {}, paragraph_bboxes_copy
 
 
 @dataclass
@@ -29,6 +275,12 @@ class WrappedParagraph:
     lines: list[str]
     text: str
     has_text: bool
+
+
+@dataclass
+class WrapResult:
+    paragraphs: list[WrappedParagraph]
+    has_overflow: bool
 
 
 @dataclass
@@ -46,11 +298,16 @@ def wrap_text(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     max_width: int,
     tab_width: int = 4,
-) -> list[WrappedParagraph]:
-    """Wrap each paragraph to fit within the given width."""
+) -> WrapResult:
+    """Wrap each paragraph to fit within the given width.
+
+    Returns:
+        WrapResult containing wrapped paragraphs and overflow flag
+    """
 
     paragraphs = text.split("\n")
     wrapped_paragraphs: list[WrappedParagraph] = []
+    has_overflow = False
 
     for paragraph in paragraphs:
         stripped_paragraph = paragraph.strip()
@@ -98,6 +355,8 @@ def wrap_text(
                 )
                 bbox = draw.textbbox((0, 0), test_line, font=font)
                 if bbox[2] - bbox[0] > max_width:
+                    # Word is too long to fit on a line - mark as overflow
+                    has_overflow = True
                     paragraph_lines.append(
                         (leading_whitespace if is_first_line else "") + word
                     )
@@ -115,7 +374,7 @@ def wrap_text(
             )
         )
 
-    return wrapped_paragraphs
+    return WrapResult(paragraphs=wrapped_paragraphs, has_overflow=has_overflow)
 
 
 def arrange_lines_in_columns(
@@ -182,6 +441,7 @@ def create_image_with_text(
     num_columns: int = 1,
     column_gap: int = 20,
     column_width: int | None = None,
+    paper_texture_path: str | None = None,
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -201,6 +461,7 @@ def create_image_with_text(
         num_columns: Number of columns to use when laying out text
         column_gap: Gap in pixels between columns
         column_width: Fixed pixel width for each column (None to auto-size)
+        paper_texture_path: Optional path to paper texture image to use as background
 
     Returns:
         tuple: (PIL Image object, string of text that actually fits in the image, paragraph bounding boxes)
@@ -218,50 +479,93 @@ def create_image_with_text(
     column_gap = int(column_gap * scale_factor)
 
     image = Image.new("RGB", scaled_image_size, color=bg_color)
+
+    # Convert bg_color to RGBA if it's RGB
+    if isinstance(bg_color, tuple) and len(bg_color) == 3:
+        bg_color_rgba = bg_color + (255,)
+    elif isinstance(bg_color, str):
+        # PIL will handle string colors, but we need RGBA
+        temp_img = Image.new("RGB", (1, 1), color=bg_color)
+        rgb = temp_img.getpixel((0, 0))
+        bg_color_rgba = rgb + (255,)
+    else:
+        bg_color_rgba = bg_color
+
+    image = Image.new("RGBA", scaled_image_size, color=bg_color_rgba)
     image.info["dpi"] = (dpi, dpi)
     draw = ImageDraw.Draw(image)
 
-    # add gaussian noice to the background to make it more realistic and less uniform
-    noise = Image.effect_noise(scaled_image_size, 10)
-    image = Image.blend(image, noise.convert("RGB"), 0.1)
-    draw = ImageDraw.Draw(image)
+    # Apply paper texture if provided
+    if paper_texture_path is not None:
+        # Convert to RGB temporarily for texture application
+        image_rgb = image.convert("RGB")
+        image_rgb = apply_paper_texture(image_rgb, paper_texture_path, blend_alpha=0.9)
+        # Convert back to RGBA
+        image = image_rgb.convert("RGBA")
+        draw = ImageDraw.Draw(image)
+    else:
+        # add gaussian noice to the background to make it more realistic and less uniform
+        noise = Image.effect_noise(scaled_image_size, 10)
+        noise_rgba = noise.convert("RGBA")
+        image = Image.blend(image, noise_rgba, 0.1)
+        draw = ImageDraw.Draw(image)
 
-    # add "dirt" texture to the background
-    dirt_texture = Image.effect_noise(scaled_image_size, 5)
-    image = Image.blend(image, dirt_texture.convert("RGB"), 0.05)
-    draw = ImageDraw.Draw(image)
+        # add "dirt" texture to the background
+        dirt_texture = Image.effect_noise(scaled_image_size, 5)
+        dirt_rgba = dirt_texture.convert("RGBA")
+        image = Image.blend(image, dirt_rgba, 0.05)
+        draw = ImageDraw.Draw(image)
 
     font = load_font(font_path=font_path, font_size=scaled_font_size)
 
     usable_width = max(1, int(scaled_image_size[0] * max_width_ratio))
     num_columns = max(1, num_columns)
     column_gap = max(0, column_gap)
-    total_gap = column_gap * (num_columns - 1)
-    if usable_width - total_gap <= 0:
-        num_columns = 1
-        column_gap = 0
-        total_gap = 0
 
-    max_available_width = max(1, usable_width - total_gap)
-    if max_available_width < num_columns:
-        num_columns = 1
-        column_gap = 0
-        total_gap = 0
-        max_available_width = max(1, usable_width)
-    if column_width is not None:
-        requested_width = max(1, column_width)
-        resolved_column_width = min(requested_width, max_available_width)
-        if resolved_column_width * num_columns > max_available_width:
+    # Retry loop: reduce columns if words don't fit
+    wrapped_paragraphs = None
+    has_overflow = True
+    while has_overflow and num_columns >= 1:
+        total_gap = column_gap * (num_columns - 1)
+        if usable_width - total_gap <= 0:
+            num_columns = 1
+            column_gap = 0
+            total_gap = 0
+
+        max_available_width = max(1, usable_width - total_gap)
+        if max_available_width < num_columns:
+            num_columns = 1
+            column_gap = 0
+            total_gap = 0
+            max_available_width = max(1, usable_width)
+        if column_width is not None:
+            requested_width = max(1, column_width)
+            resolved_column_width = min(requested_width, max_available_width)
+            if resolved_column_width * num_columns > max_available_width:
+                resolved_column_width = max(1, max_available_width // num_columns)
+        else:
             resolved_column_width = max(1, max_available_width // num_columns)
-    else:
-        resolved_column_width = max(1, max_available_width // num_columns)
 
-    resolved_column_width = max(1, resolved_column_width)
-    column_width = resolved_column_width
+        resolved_column_width = max(1, resolved_column_width)
+        current_column_width = resolved_column_width
+
+        # Try wrapping with current column configuration
+        wrap_result = wrap_text(draw, text, font, current_column_width, tab_width)
+        wrapped_paragraphs = wrap_result.paragraphs
+        has_overflow = wrap_result.has_overflow
+
+        # If overflow detected and we can reduce columns, try again
+        if has_overflow and num_columns > 1:
+            num_columns -= 1
+        else:
+            # Either no overflow or we're at minimum columns (1)
+            break
+
+    # Final column configuration after retry loop
+    column_width = current_column_width
+    total_gap = column_gap * (num_columns - 1)
     block_width = column_width * num_columns + total_gap
     margin_x = max(0, (scaled_image_size[0] - block_width) // 2)
-
-    wrapped_paragraphs = wrap_text(draw, text, font, column_width, tab_width)
 
     line_height = (
         draw.textbbox((0, 0), "Ag", font=font)[3]
@@ -359,752 +663,6 @@ def create_image_with_text(
     return image, actual_text, paragraph_bboxes
 
 
-def apply_random_transformation(
-    image: Image.Image,
-    bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
-    transformation = random.choice(
-        ["blur", "rotate", "ink_splashes", "skew", "perspective", "dusty-paper"]
-    )
-
-    paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
-
-    if transformation == "blur":
-        radius = random.uniform(0.1, 0.5)
-        return (
-            image.filter(ImageFilter.GaussianBlur(radius)),
-            {
-                "transformation": "blur",
-                "radius": round(radius, 2),
-            },
-            paragraph_bboxes_copy,
-        )
-
-    if transformation == "rotate":
-        angle = random.uniform(-5, 5)
-        rotated, rotate_meta = _rotate_within_bounds(image, bg_color, angle)
-        transformed_bboxes = _transform_paragraph_bboxes_for_rotation(
-            paragraph_bboxes_copy, rotate_meta
-        )
-        return (
-            rotated,
-            {
-                "transformation": "rotate",
-                "angle": round(angle, 2),
-            },
-            transformed_bboxes,
-        )
-
-    if transformation == "ink_splashes":
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        overlay_draw = ImageDraw.Draw(overlay)
-        splashes = random.randint(3, 6)
-        for _ in range(splashes):
-            radius = random.randint(10, 30)
-            cx = random.randint(0, image.width)
-            cy = random.randint(0, image.height)
-            bbox = [cx - radius, cy - radius, cx + radius, cy + radius]
-            color = (0, 0, 0, random.randint(80, 150))
-            overlay_draw.ellipse(bbox, fill=color)
-        combined = Image.alpha_composite(image.convert("RGBA"), overlay)
-        return (
-            combined.convert("RGB"),
-            {
-                "transformation": "ink_splashes",
-                "splashes": splashes,
-            },
-            paragraph_bboxes_copy,
-        )
-
-    if transformation == "perspective":
-        perspective_type = random.choice(["book_curve", "camera_angle", "combined"])
-        perspective_img, perspective_meta = _apply_perspective_distortion(
-            image, bg_color, perspective_type
-        )
-        transformed_bboxes = _transform_paragraph_bboxes_for_perspective(
-            paragraph_bboxes_copy, perspective_meta
-        )
-        return (
-            perspective_img,
-            {
-                "transformation": "perspective",
-                "type": perspective_type,
-                **perspective_meta,
-            },
-            transformed_bboxes,
-        )
-
-    if transformation == "dusty-paper":
-        # create grainy overlay to simulate dusty paper
-        # varies in grain size and intensity
-        grain_size = random.randint(1, 3)
-        intensity = random.uniform(0.05, 0.15)
-        noise = Image.effect_noise(image.size, grain_size * 10)
-        grainy_overlay = noise.convert("RGB")
-        dusty_image = Image.blend(image, grainy_overlay, intensity)
-        return (
-            dusty_image,
-            {
-                "transformation": "dusty-paper",
-                "grain_size": grain_size,
-                "intensity": round(intensity, 3),
-            },
-            paragraph_bboxes_copy,
-        )
-
-    dx = random.uniform(-0.2, 0.2)
-    skewed, skew_meta = _skew_within_bounds(image, bg_color, dx)
-    transformed_bboxes = _transform_paragraph_bboxes_for_skew(
-        paragraph_bboxes_copy, skew_meta
-    )
-    return (
-        skewed,
-        {
-            "transformation": "skew",
-            "skew_factor": round(dx, 3),
-        },
-        transformed_bboxes,
-    )
-
-
-def _rotate_within_bounds(
-    image: Image.Image, bg_color: str | tuple[int, int, int], angle: float
-) -> tuple[Image.Image, dict]:
-    width, height = image.size
-
-    # Calculate how much the corners can expand when rotated
-    angle_rad = math.radians(abs(angle))
-    cos_a = abs(math.cos(angle_rad))
-    sin_a = abs(math.sin(angle_rad))
-
-    # Maximum dimensions after rotation
-    max_width = int(width * cos_a + height * sin_a)
-    max_height = int(width * sin_a + height * cos_a)
-
-    # Create canvas large enough for rotation
-    pad = max(max_width - width, max_height - height) // 2 + 20
-    canvas_width = width + pad * 2
-    canvas_height = height + pad * 2
-    canvas = Image.new("RGB", (canvas_width, canvas_height), bg_color)
-    canvas.paste(image, (pad, pad))
-
-    # Rotate
-    rotated = canvas.rotate(
-        angle,
-        resample=Image.Resampling.BICUBIC,
-        expand=True,
-        fillcolor=bg_color,
-    )
-
-    # Crop from center
-    center_x = rotated.width / 2
-    center_y = rotated.height / 2
-
-    # If rotated content is larger than target, scale it down
-    scale = min(width / max_width, height / max_height, 1.0)
-
-    crop_width = int(width / scale)
-    crop_height = int(height / scale)
-
-    left = center_x - crop_width // 2
-    top = center_y - crop_height // 2
-
-    cropped = rotated.crop((left, top, left + crop_width, top + crop_height))
-
-    # Resize back to original dimensions if we scaled
-    if scale < 1.0:
-        cropped = cropped.resize((width, height), Image.Resampling.BICUBIC)
-
-    rotation_meta = {
-        "pad": pad,
-        "canvas_size": (canvas_width, canvas_height),
-        "rotation_center": (canvas_width / 2, canvas_height / 2),
-        "rotated_size": (rotated.width, rotated.height),
-        "rotation_offset": (
-            rotated.width / 2 - canvas_width / 2,
-            rotated.height / 2 - canvas_height / 2,
-        ),
-        "angle": angle,
-        "crop_box": (left, top, left + crop_width, top + crop_height),
-        "resize_scale": (
-            width / crop_width if scale < 1.0 else 1.0,
-            height / crop_height if scale < 1.0 else 1.0,
-        ),
-        "target_size": (width, height),
-    }
-
-    return cropped, rotation_meta
-
-
-def _skew_within_bounds(
-    image: Image.Image, bg_color: str | tuple[int, int, int], dx: float
-) -> tuple[Image.Image, dict]:
-    width, height = image.size
-
-    # Calculate the expanded width after skew
-    max_shift = abs(dx * height)
-    expanded_width = width + max_shift
-
-    # Create large canvas
-    pad_x = int(max_shift) + 40
-    canvas_width = width + pad_x * 2
-    canvas = Image.new("RGB", (canvas_width, height), bg_color)
-    canvas.paste(image, (pad_x, 0))
-
-    # Apply skew
-    matrix = (1, dx, 0, 0, 1, 0)
-    skewed = canvas.transform(
-        canvas.size,
-        Image.Transform.AFFINE,
-        matrix,
-        resample=Image.Resampling.BICUBIC,
-        fillcolor=bg_color,
-    )
-
-    # Find center and crop expanded area
-    center_x = skewed.width // 2
-    crop_width = int(expanded_width)
-    left = center_x - crop_width // 2
-
-    cropped = skewed.crop((left, 0, left + crop_width, height))
-
-    resized = cropped.resize((width, height), Image.Resampling.BICUBIC)
-    skew_meta = {
-        "dx": dx,
-        "pad_x": pad_x,
-        "expanded_width": expanded_width,
-        "canvas_width": canvas_width,
-        "crop_box": (left, 0, left + crop_width, height),
-        "resize_scale_x": width / crop_width if crop_width else 1.0,
-        "resize_scale_y": 1.0,
-        "target_size": (width, height),
-    }
-
-    return resized, skew_meta
-
-
-def _copy_paragraph_bboxes(paragraph_bboxes: list[dict] | None) -> list[dict]:
-    if not paragraph_bboxes:
-        return []
-    return [{**bbox, "bbox": list(bbox.get("bbox", []))} for bbox in paragraph_bboxes]
-
-
-def _transform_paragraph_bboxes_for_rotation(
-    paragraph_bboxes: list[dict], meta: dict
-) -> list[dict]:
-    if not paragraph_bboxes:
-        return []
-
-    pad = meta["pad"]
-    center_x, center_y = meta["rotation_center"]
-    offset_x, offset_y = meta["rotation_offset"]
-    angle_rad = math.radians(meta["angle"])
-    cos_theta = math.cos(angle_rad)
-    sin_theta = math.sin(angle_rad)
-    crop_left, crop_top, _, _ = meta["crop_box"]
-    scale_x, scale_y = meta["resize_scale"]
-    target_width, target_height = meta["target_size"]
-
-    transformed: list[dict] = []
-
-    def _map_point(x: float, y: float) -> tuple[float, float]:
-        canvas_x = x + pad
-        canvas_y = y + pad
-        rel_x = canvas_x - center_x
-        rel_y = canvas_y - center_y
-        rotated_x = cos_theta * rel_x - sin_theta * rel_y + center_x
-        rotated_y = sin_theta * rel_x + cos_theta * rel_y + center_y
-        rotated_x += offset_x
-        rotated_y += offset_y
-        cropped_x = rotated_x - crop_left
-        cropped_y = rotated_y - crop_top
-        return cropped_x * scale_x, cropped_y * scale_y
-
-    for bbox in paragraph_bboxes:
-        x0, y0, x1, y1 = bbox.get("bbox", [0, 0, 0, 0])
-        points = [
-            _map_point(x0, y0),
-            _map_point(x1, y0),
-            _map_point(x1, y1),
-            _map_point(x0, y1),
-        ]
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
-        clamped_x0 = _clamp_value(min_x, 0.0, float(target_width))
-        clamped_x1 = _clamp_value(max_x, 0.0, float(target_width))
-        clamped_y0 = _clamp_value(min_y, 0.0, float(target_height))
-        clamped_y1 = _clamp_value(max_y, 0.0, float(target_height))
-        if clamped_x1 < clamped_x0:
-            clamped_x1 = clamped_x0
-        if clamped_y1 < clamped_y0:
-            clamped_y1 = clamped_y0
-        transformed.append(
-            {
-                **bbox,
-                "bbox": _round_bbox([clamped_x0, clamped_y0, clamped_x1, clamped_y1]),
-            }
-        )
-
-    return transformed
-
-
-def _transform_paragraph_bboxes_for_skew(
-    paragraph_bboxes: list[dict], meta: dict
-) -> list[dict]:
-    if not paragraph_bboxes:
-        return []
-
-    pad_x = meta["pad_x"]
-    dx = meta["dx"]
-    crop_left, crop_top, _, _ = meta["crop_box"]
-    scale_x = meta["resize_scale_x"]
-    scale_y = meta["resize_scale_y"]
-    target_width, target_height = meta["target_size"]
-
-    def _map_point(x: float, y: float) -> tuple[float, float]:
-        x_with_pad = x + pad_x
-        y_with_pad = y
-        skewed_x = x_with_pad - dx * y_with_pad
-        cropped_x = skewed_x - crop_left
-        cropped_y = y_with_pad - crop_top
-        return cropped_x * scale_x, cropped_y * scale_y
-
-    transformed: list[dict] = []
-    for bbox in paragraph_bboxes:
-        x0, y0, x1, y1 = bbox.get("bbox", [0, 0, 0, 0])
-        points = [
-            _map_point(x0, y0),
-            _map_point(x1, y0),
-            _map_point(x1, y1),
-            _map_point(x0, y1),
-        ]
-        xs = [p[0] for p in points]
-        ys = [p[1] for p in points]
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
-        clamped_x0 = _clamp_value(min_x, 0.0, float(target_width))
-        clamped_x1 = _clamp_value(max_x, 0.0, float(target_width))
-        clamped_y0 = _clamp_value(min_y, 0.0, float(target_height))
-        clamped_y1 = _clamp_value(max_y, 0.0, float(target_height))
-        if clamped_x1 < clamped_x0:
-            clamped_x1 = clamped_x0
-        if clamped_y1 < clamped_y0:
-            clamped_y1 = clamped_y0
-        transformed.append(
-            {
-                **bbox,
-                "bbox": _round_bbox([clamped_x0, clamped_y0, clamped_x1, clamped_y1]),
-            }
-        )
-
-    return transformed
-
-
-def _clamp_value(value: float, minimum: float, maximum: float) -> float:
-    return max(minimum, min(value, maximum))
-
-
-def _round_bbox(coords: list[float]) -> list[int]:
-    return [int(round(value)) for value in coords]
-
-
-def _apply_perspective_distortion(
-    image: Image.Image,
-    bg_color: str | tuple[int, int, int],
-    distortion_type: str = "book_curve",
-) -> tuple[Image.Image, dict]:
-    """
-    Apply perspective distortion to simulate book curvature or camera angles.
-
-    Args:
-        image: Input image
-        bg_color: Background color for filling
-        distortion_type: Type of distortion ("book_curve", "camera_angle", or "combined")
-
-    Returns:
-        Tuple of (transformed image, metadata dictionary)
-    """
-    width, height = image.size
-
-    # Create a much larger canvas to accommodate the transformation
-    # This ensures content doesn't get cut off
-    pad = max(width, height) // 2  # Dynamic padding based on image size
-    canvas_width = width + pad * 2
-    canvas_height = height + pad * 2
-    canvas = Image.new("RGB", (canvas_width, canvas_height), bg_color)
-    canvas.paste(image, (pad, pad))
-
-    # Define the four corners of the original image on the canvas
-    # Top-left, top-right, bottom-right, bottom-left
-    src_points = [
-        (pad, pad),
-        (pad + width, pad),
-        (pad + width, pad + height),
-        (pad, pad + height),
-    ]
-
-    # Initialize destination points (will be modified based on distortion type)
-    dst_points = list(src_points)
-
-    metadata = {
-        "pad": pad,
-        "canvas_size": (canvas_width, canvas_height),
-        "src_points": src_points,
-    }
-
-    if distortion_type == "book_curve":
-        # Simulate book spine curvature - push center inward, pull edges outward
-        # Reduced intensity to keep content within bounds
-        curve_intensity = random.uniform(0.02, 0.08)
-        vertical_offset = int(height * curve_intensity)
-        horizontal_inset = int(width * curve_intensity * 0.3)
-
-        # Adjust corners to create curve effect
-        # Keep well within the padded canvas
-        dst_points = [
-            (
-                pad + horizontal_inset,
-                pad + vertical_offset // 2,
-            ),  # top-left (reduced vertical)
-            (pad + width - horizontal_inset, pad + vertical_offset // 2),  # top-right
-            (
-                pad + width - horizontal_inset,
-                pad + height - vertical_offset // 2,
-            ),  # bottom-right
-            (
-                pad + horizontal_inset,
-                pad + height - vertical_offset // 2,
-            ),  # bottom-left
-        ]
-
-        metadata.update(
-            {
-                "curve_intensity": round(curve_intensity, 3),
-                "vertical_offset": vertical_offset,
-                "horizontal_inset": horizontal_inset,
-            }
-        )
-
-    elif distortion_type == "camera_angle":
-        # Simulate viewing document from an angle (trapezoidal perspective)
-        angle_type = random.choice(["top", "bottom", "left", "right"])
-        # Reduced strength to prevent content from going out of bounds
-        perspective_strength = random.uniform(0.05, 0.15)
-
-        if angle_type == "top":
-            # Camera above, looking down - top appears smaller
-            shrink = int(width * perspective_strength)
-            dst_points = [
-                (pad + shrink, pad),
-                (pad + width - shrink, pad),
-                (pad + width, pad + height),
-                (pad, pad + height),
-            ]
-        elif angle_type == "bottom":
-            # Camera below, looking up - bottom appears smaller
-            shrink = int(width * perspective_strength)
-            dst_points = [
-                (pad, pad),
-                (pad + width, pad),
-                (pad + width - shrink, pad + height),
-                (pad + shrink, pad + height),
-            ]
-        elif angle_type == "left":
-            # Camera to the left - left side appears smaller
-            shrink = int(height * perspective_strength)
-            dst_points = [
-                (pad, pad + shrink),
-                (pad + width, pad),
-                (pad + width, pad + height),
-                (pad, pad + height - shrink),
-            ]
-        else:  # right
-            # Camera to the right - right side appears smaller
-            shrink = int(height * perspective_strength)
-            dst_points = [
-                (pad, pad),
-                (pad + width, pad + shrink),
-                (pad + width, pad + height - shrink),
-                (pad, pad + height),
-            ]
-
-        metadata.update(
-            {
-                "angle_type": angle_type,
-                "perspective_strength": round(perspective_strength, 3),
-            }
-        )
-
-    else:  # combined
-        # Combine both book curve and camera angle
-        # Very conservative values for combined effect
-        curve = random.uniform(0.02, 0.05)
-        angle = random.uniform(0.03, 0.08)
-
-        v_offset = int(height * curve)
-        h_inset = int(width * curve * 0.3)
-        shrink = int(width * angle * 0.5)
-
-        # Create a combined effect - keep within bounds
-        dst_points = [
-            (pad + h_inset + shrink, pad + v_offset // 2),
-            (pad + width - h_inset - shrink, pad + v_offset // 2),
-            (pad + width - h_inset, pad + height - v_offset // 2),
-            (pad + h_inset, pad + height - v_offset // 2),
-        ]
-
-        metadata.update(
-            {
-                "curve_intensity": round(curve, 3),
-                "perspective_strength": round(angle, 3),
-            }
-        )
-
-    metadata["dst_points"] = dst_points
-
-    # Calculate perspective transform coefficients
-    coeffs = _find_perspective_coefficients(src_points, dst_points)
-
-    # Apply perspective transformation
-    transformed = canvas.transform(
-        canvas.size,
-        Image.Transform.PERSPECTIVE,
-        coeffs,
-        resample=Image.Resampling.BICUBIC,
-        fillcolor=bg_color,
-    )
-
-    # Find bounding box of the transformed content
-    bbox = _find_content_bbox(transformed, bg_color)
-
-    # Crop and resize back to original dimensions
-    if bbox:
-        x0, y0, x1, y1 = bbox
-        # Add safety margin to ensure we capture all content
-        margin = 10
-        x0 = max(0, x0 - margin)
-        y0 = max(0, y0 - margin)
-        x1 = min(canvas_width, x1 + margin)
-        y1 = min(canvas_height, y1 + margin)
-
-        cropped = transformed.crop((x0, y0, x1, y1))
-        metadata["crop_box"] = (x0, y0, x1, y1)
-        metadata["crop_size"] = (x1 - x0, y1 - y0)
-    else:
-        # If no content found, use the original image area with padding
-        x0, y0 = pad // 2, pad // 2
-        x1, y1 = pad + width + pad // 2, pad + height + pad // 2
-        cropped = transformed.crop((x0, y0, x1, y1))
-        metadata["crop_box"] = (x0, y0, x1, y1)
-        metadata["crop_size"] = (x1 - x0, y1 - y0)
-
-    # Resize back to original size
-    final = cropped.resize((width, height), Image.Resampling.BICUBIC)
-
-    metadata["coeffs"] = coeffs
-    metadata["target_size"] = (width, height)
-
-    return final, metadata
-
-
-def _find_perspective_coefficients(
-    src_points: list[tuple], dst_points: list[tuple]
-) -> tuple:
-    """
-    Calculate perspective transform coefficients from source to destination points.
-    Uses the 8-parameter perspective transform matrix.
-    """
-    # Extract coordinates
-    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = src_points
-    (X0, Y0), (X1, Y1), (X2, Y2), (X3, Y3) = dst_points
-
-    # Solve the linear system for the 8 coefficients
-    # This is a simplified approach; for more accuracy, use matrix operations
-    matrix = []
-    matrix.append([x0, y0, 1, 0, 0, 0, -X0 * x0, -X0 * y0])
-    matrix.append([0, 0, 0, x0, y0, 1, -Y0 * x0, -Y0 * y0])
-    matrix.append([x1, y1, 1, 0, 0, 0, -X1 * x1, -X1 * y1])
-    matrix.append([0, 0, 0, x1, y1, 1, -Y1 * x1, -Y1 * y1])
-    matrix.append([x2, y2, 1, 0, 0, 0, -X2 * x2, -X2 * y2])
-    matrix.append([0, 0, 0, x2, y2, 1, -Y2 * x2, -Y2 * y2])
-    matrix.append([x3, y3, 1, 0, 0, 0, -X3 * x3, -X3 * y3])
-    matrix.append([0, 0, 0, x3, y3, 1, -Y3 * x3, -Y3 * y3])
-
-    b = [X0, Y0, X1, Y1, X2, Y2, X3, Y3]
-
-    # Simple Gaussian elimination for 8x8 system
-    coeffs = _solve_linear_system(matrix, b)
-
-    return tuple(coeffs)
-
-
-def _solve_linear_system(matrix: list[list[float]], b: list[float]) -> list[float]:
-    """Solve linear system using Gaussian elimination."""
-    n = len(matrix)
-    # Create augmented matrix
-    for i in range(n):
-        matrix[i].append(b[i])
-
-    # Forward elimination
-    for i in range(n):
-        # Find pivot
-        max_row = i
-        for k in range(i + 1, n):
-            if abs(matrix[k][i]) > abs(matrix[max_row][i]):
-                max_row = k
-        matrix[i], matrix[max_row] = matrix[max_row], matrix[i]
-
-        # Make all rows below this one 0 in current column
-        for k in range(i + 1, n):
-            if matrix[i][i] == 0:
-                continue
-            factor = matrix[k][i] / matrix[i][i]
-            for j in range(i, n + 1):
-                matrix[k][j] -= factor * matrix[i][j]
-
-    # Back substitution
-    solution = [0.0] * n
-    for i in range(n - 1, -1, -1):
-        if matrix[i][i] == 0:
-            solution[i] = 0
-            continue
-        solution[i] = matrix[i][n]
-        for j in range(i + 1, n):
-            solution[i] -= matrix[i][j] * solution[j]
-        solution[i] /= matrix[i][i]
-
-    return solution
-
-
-def _find_content_bbox(
-    image: Image.Image,
-    bg_color: str | tuple[int, int, int],
-    threshold: int = 20,
-) -> tuple[int, int, int, int] | None:
-    """
-    Find the bounding box of non-background content in the image.
-    """
-    # Convert bg_color to RGB tuple if it's a string
-    if isinstance(bg_color, str):
-        from PIL import ImageColor
-
-        bg_rgb = ImageColor.getrgb(bg_color)
-    else:
-        bg_rgb = bg_color
-
-    # Convert to numpy-like processing
-    pixels = image.load()
-    if pixels is None:
-        return None
-    width, height = image.size
-
-    min_x, min_y = width, height
-    max_x, max_y = 0, 0
-
-    found_content = False
-
-    for y in range(height):
-        for x in range(width):
-            pixel = pixels[x, y]
-            if not isinstance(pixel, tuple) or len(pixel) < 3:
-                continue
-            r, g, b = pixel[0], pixel[1], pixel[2]
-            # Check if pixel is significantly different from background
-            diff = abs(r - bg_rgb[0]) + abs(g - bg_rgb[1]) + abs(b - bg_rgb[2])
-            if diff > threshold:
-                found_content = True
-                min_x = min(min_x, x)
-                min_y = min(min_y, y)
-                max_x = max(max_x, x)
-                max_y = max(max_y, y)
-
-    if not found_content:
-        return None
-
-    # Add small padding
-    pad = 5
-    min_x = max(0, min_x - pad)
-    min_y = max(0, min_y - pad)
-    max_x = min(width, max_x + pad)
-    max_y = min(height, max_y + pad)
-
-    return (min_x, min_y, max_x, max_y)
-
-
-def _transform_paragraph_bboxes_for_perspective(
-    paragraph_bboxes: list[dict], meta: dict
-) -> list[dict]:
-    """
-    Transform paragraph bounding boxes through perspective transformation.
-    This is an approximation since the exact inverse transform is complex.
-    """
-    if not paragraph_bboxes:
-        return []
-
-    # For perspective transforms, the bounding boxes will be approximate
-    # since we're doing multiple transformations (pad, perspective, crop, resize)
-    # We'll use a simplified approach that scales the boxes appropriately
-
-    pad = meta["pad"]
-    canvas_width, canvas_height = meta["canvas_size"]
-    crop_box = meta.get("crop_box", (0, 0, canvas_width, canvas_height))
-    crop_left, crop_top, crop_right, crop_bottom = crop_box
-    crop_width = crop_right - crop_left
-    crop_height = crop_bottom - crop_top
-    target_width, target_height = meta["target_size"]
-
-    scale_x = target_width / crop_width if crop_width > 0 else 1.0
-    scale_y = target_height / crop_height if crop_height > 0 else 1.0
-
-    transformed: list[dict] = []
-
-    for bbox in paragraph_bboxes:
-        x0, y0, x1, y1 = bbox.get("bbox", [0, 0, 0, 0])
-
-        # Translate to canvas coordinates
-        canvas_x0 = x0 + pad
-        canvas_y0 = y0 + pad
-        canvas_x1 = x1 + pad
-        canvas_y1 = y1 + pad
-
-        # After perspective transform, estimate the box position
-        # (This is simplified - exact transformation would require applying the inverse)
-        # For now, we just adjust for the crop and resize
-        cropped_x0 = canvas_x0 - crop_left
-        cropped_y0 = canvas_y0 - crop_top
-        cropped_x1 = canvas_x1 - crop_left
-        cropped_y1 = canvas_y1 - crop_top
-
-        # Scale to final size
-        final_x0 = cropped_x0 * scale_x
-        final_y0 = cropped_y0 * scale_y
-        final_x1 = cropped_x1 * scale_x
-        final_y1 = cropped_y1 * scale_y
-
-        # Clamp to image bounds
-        clamped_x0 = _clamp_value(final_x0, 0.0, float(target_width))
-        clamped_y0 = _clamp_value(final_y0, 0.0, float(target_height))
-        clamped_x1 = _clamp_value(final_x1, 0.0, float(target_width))
-        clamped_y1 = _clamp_value(final_y1, 0.0, float(target_height))
-
-        if clamped_x1 < clamped_x0:
-            clamped_x1 = clamped_x0
-        if clamped_y1 < clamped_y0:
-            clamped_y1 = clamped_y0
-
-        transformed.append(
-            {
-                **bbox,
-                "bbox": _round_bbox([clamped_x0, clamped_y0, clamped_x1, clamped_y1]),
-            }
-        )
-
-    return transformed
-
-
 def dummy_text_with_line_breaks(num_sentences=5):
     sentences = [
         "Icelandic characters: ð, þ, æ, ö, á, é, í, ó, ú.",
@@ -1122,3 +680,106 @@ def dummy_text_with_line_breaks(num_sentences=5):
     ]
     selected_sentences = random.choices(sentences, k=num_sentences)
     return "\n".join(selected_sentences)
+
+
+def _visualise_bboxes(
+    image: Image.Image,
+    paragraph_bboxes: list[dict],
+    line_width: int = 2,
+    show_labels: bool = True,
+    max_label_chars: int = 20,
+) -> Image.Image:
+    """
+    Draw bounding boxes on an image to visualize paragraph locations.
+
+    Args:
+        image: PIL Image object to draw on
+        paragraph_bboxes: List of bbox dictionaries with format:
+            [{"paragraph_index": int, "paragraph_text": str, "column": int, "bbox": [x1, y1, x2, y2]}]
+        line_width: Width of the rectangle border in pixels
+        show_labels: Whether to show paragraph text preview labels
+        max_label_chars: Maximum number of characters to show in label preview
+
+    Returns:
+        PIL Image object with bounding boxes drawn
+    """
+    # Create a copy to avoid modifying the original
+    visualized_image = image.copy()
+    draw = ImageDraw.Draw(visualized_image)
+
+    # Define color palette for sequential cycling
+    color_palette = [
+        (255, 0, 0),  # Red
+        (0, 0, 255),  # Blue
+        (0, 255, 0),  # Green
+        (255, 255, 0),  # Yellow
+        (0, 255, 255),  # Cyan
+        (255, 0, 255),  # Magenta
+        (255, 165, 0),  # Orange
+        (128, 0, 128),  # Purple
+    ]
+
+    # Load a small font for labels
+    try:
+        label_font = ImageFont.truetype("Arial.ttf", 12)
+    except OSError:
+        label_font = ImageFont.load_default()
+
+    # Draw each bbox
+    for idx, bbox_data in enumerate(paragraph_bboxes):
+        # Get bbox coordinates
+        bbox = bbox_data.get("bbox", [0, 0, 0, 0])
+        if len(bbox) != 4:
+            continue
+
+        x1, y1, x2, y2 = bbox
+
+        # Select color from palette (cycle sequentially)
+        color = color_palette[idx % len(color_palette)]
+
+        # Draw rectangle
+        draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
+
+        # Draw label if enabled
+        if show_labels:
+            paragraph_text = bbox_data.get("paragraph_text", "")
+            if paragraph_text:
+                # Truncate text to max_label_chars
+                label_text = paragraph_text[:max_label_chars]
+                if len(paragraph_text) > max_label_chars:
+                    label_text += "..."
+
+                # Calculate label background size
+                label_bbox = draw.textbbox((0, 0), label_text, font=label_font)
+                label_width = label_bbox[2] - label_bbox[0]
+                label_height = label_bbox[3] - label_bbox[1]
+
+                # Position label at top-left of bbox with padding
+                label_x = x1
+                label_y = y1 - label_height - 4  # 4px padding
+
+                # If label would go above image, place it inside the bbox
+                if label_y < 0:
+                    label_y = y1 + 2
+
+                # Draw semi-transparent background for label
+                background_padding = 2
+                draw.rectangle(
+                    [
+                        label_x - background_padding,
+                        label_y - background_padding,
+                        label_x + label_width + background_padding,
+                        label_y + label_height + background_padding,
+                    ],
+                    fill=(0, 0, 0, 200),  # Black with some transparency
+                )
+
+                # Draw label text
+                draw.text(
+                    (label_x, label_y),
+                    label_text,
+                    fill=(255, 255, 255),
+                    font=label_font,
+                )
+
+    return visualized_image

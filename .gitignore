@@ -11,6 +11,8 @@ SmolVLM-Base-ocr-isl-with-isl-bacbone
 eng_synthetic_ocr_output_v2/
 icelandic_fonts/
 isl_synthetic_ocr_output_v2/
+.fontcache
+isl_synthetic_ocr_output_v3/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -230,3 +232,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local outputs
+local_output/

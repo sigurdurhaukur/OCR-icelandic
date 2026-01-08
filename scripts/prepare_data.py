@@ -23,24 +23,25 @@ python scripts/prepare_data.py \
 Generating icelandic synthetic OCR dataset as an example:
 
 python scripts/prepare_data.py \
-    dataset_path="arnastofnun/IGC-2024" \
+    dataset_path="arnastofnun/igc-2024" \
     text_column="document" \
     data_directory="parla" \
     split="train" \
     max_entries=1 \
     max_num_columns=1 \
     max_workers=1 \
-    output_path="isl_synthetic_ocr_output_v2" \
+    output_path="isl_synthetic_ocr_output_v3" \
     num_examples=2000 \
-    push_to_hub=True \
-    hub_repo_id="Sigurdur/isl_synthetic_ocr_v2" \
-    apply_random_transformations=False \
+    push_to_hub=true \
+    hub_repo_id="Sigurdur/isl_synthetic_ocr_v3" \
+    apply_random_transformations=false \
     font_path="./icelandic_fonts" \
 
 """
 
 import gc
 import logging
+import os
 import random
 import shutil
 import sys
@@ -62,10 +63,19 @@ from datasets import (
 from fontTools.ttLib import TTFont
 from omegaconf import OmegaConf
 from PIL import Image as PILImage
+from PIL import ImageColor
 from rich.logging import RichHandler
 from tqdm import tqdm
 
-from ocr_icelandic.utils import apply_random_transformation, create_image_with_text
+from ocr_icelandic.fonts import get_compatible_fonts, sync_google_fonts
+from ocr_icelandic.transformations import apply_random_transformation
+from ocr_icelandic.utils import (
+    _visualise_bboxes,
+    apply_background_image,
+    create_image_with_text,
+    discover_backgrounds,
+    discover_paper_textures,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -88,7 +98,7 @@ class DataConfig:
     data_directory: str = "parla"  # Subdirectory or config name in the dataset
     split: str = "train"  # Which split to use from the dataset
     max_length: int = 512
-    max_entries: int = 400
+    max_entries: int = 2
     show_sample: bool = False  # Whether to show a sample image after creation
     image_width: int = 512
     image_height: int = 512
@@ -106,13 +116,29 @@ class DataConfig:
     text_vertical_alignment: str = "center"  # top, middle, bottom
     text_horizontal_alignment: str = "left"  # left, center, right
     output_path: str = "isl_synthetic_ocr_output"  # Directory to save dataset
-    num_examples: int = 0  # Number of examples to generate
+    num_examples: int = 2  # Number of examples to generate
     push_to_hub: bool = False  # Whether to push dataset to Hugging Face Hub
+    save_to_disk: bool = False  # Whether to save dataset to disk
     hub_repo_id: str = (
         "Sigurdur/isl_synthetic_ocr"  # Hugging Face repo ID to push dataset
     )
     use_random_fonts: bool = True  # Whether to use random fonts
     use_random_backgrounds: bool = True  # Whether to use random background colors
+    google_fonts_directory: str = "../google_fonts"  # Directory to store Google Fonts
+    language_code: str = (
+        "is"  # ISO 639-1 language code (e.g., "is" for Icelandic, "de" for German)
+    )
+    use_font_cache: bool = True  # Whether to use SQLite caching for font compatibility
+    font_cache_dir: str = ".fontcache"  # Directory to store font compatibility cache
+    use_paper_textures: bool = True  # Whether to use paper textures from assets/papers
+    paper_textures_dir: str = (
+        "assets/papers"  # Directory containing paper texture images
+    )
+    use_background_images: bool = True  # Whether to use background images
+    backgrounds_dir: str = (
+        "assets/backgrounds"  # Directory containing background images
+    )
+    background_image_probability: float = 1  # Probability of using a background image
     max_text_length: int = 2000  # Maximum characters per text before splitting
     column_gap: int = 20  # Horizontal gap in pixels between columns
     num_columns: int | None = (
@@ -128,6 +154,7 @@ class DataConfig:
         1  # Number of parallel workers for image generation (1 for sequential)
     )
     batch_size: int = 50  # Number of images to hold in memory before flushing to disk
+    local_output_dir: str = "./local_output"  # Local directory for temporary outputs
 
 
 @dataclass
@@ -137,7 +164,10 @@ class GenerationConfig(DataConfig):
     column_range: tuple[int, int] = (1, 1)
     column_width_range: tuple[int, int] = (100, 512)
     font_size_range: tuple[int, int] = (11, 24)
-    available_fonts: tuple[str, ...] | None = None
+    available_fonts: list[str] | None = None
+    available_paper_textures: list[str] | None = None
+    available_no_shadow_backgrounds: list[str] | None = None
+    available_with_shadow_backgrounds: list[str] | None = None
 
 
 @dataclass
@@ -156,31 +186,63 @@ class SingleImageData:
     text_vertical_alignment: str
     text_horizontal_alignment: str
     paragraph_bboxes: list[dict]
-    transformation: dict
+    transformations: list[dict]
 
 
 def get_random_background_color():
-    """Generate a random paper-like background color."""
-    # Choose paper type
-    paper_type = random.choice(["white", "cream", "aged"])
+    """
+    Generate a random background color with weighted distribution.
 
-    if paper_type == "white":
-        base = random.randint(245, 252)
-        r = base + random.randint(-3, 3)
-        g = base + random.randint(-5, 0)
-        b = base + random.randint(-8, 0)
-    elif paper_type == "cream":
-        base = random.randint(235, 245)
-        r = base + random.randint(0, 8)
-        g = base + random.randint(-5, 3)
-        b = base + random.randint(-12, -3)
-    else:  # aged
-        base = random.randint(220, 235)
-        r = base + random.randint(5, 15)
-        g = base + random.randint(0, 10)
-        b = base + random.randint(-15, -5)
+    Distribution: 85% light (paper-like), 10% dark, 5% colorful
 
-    # Clamp values
+    Returns:
+        Tuple[int, int, int]: RGB color tuple
+    """
+    # Weighted random selection: 85% light, 10% dark, 5% colorful
+    rand_val = random.random()
+
+    if rand_val < 0.85:
+        # Light colors (paper-like) - 85% probability
+        paper_type = random.choice(["white", "cream", "aged"])
+
+        if paper_type == "white":
+            base = random.randint(245, 252)
+            r = base + random.randint(-3, 3)
+            g = base + random.randint(-5, 0)
+            b = base + random.randint(-8, 0)
+        elif paper_type == "cream":
+            base = random.randint(235, 245)
+            r = base + random.randint(0, 8)
+            g = base + random.randint(-5, 3)
+            b = base + random.randint(-12, -3)
+        else:  # aged
+            base = random.randint(220, 235)
+            r = base + random.randint(5, 15)
+            g = base + random.randint(0, 10)
+            b = base + random.randint(-15, -5)
+
+    elif rand_val < 0.95:
+        # Dark colors - 10% probability
+        base = random.randint(20, 80)
+        r = base + random.randint(-10, 10)
+        g = base + random.randint(-10, 10)
+        b = base + random.randint(-10, 10)
+
+    else:
+        # Colorful - 5% probability
+        # At least one channel bright (>150), others varied
+        bright_channel = random.randint(0, 2)
+        colors = [0, 0, 0]
+        colors[bright_channel] = random.randint(150, 255)
+
+        # Other channels can be varied
+        for i in range(3):
+            if i != bright_channel:
+                colors[i] = random.randint(30, 220)
+
+        r, g, b = colors
+
+    # Clamp values to valid range
     r = max(0, min(255, r))
     g = max(0, min(255, g))
     b = max(0, min(255, b))
@@ -188,25 +250,66 @@ def get_random_background_color():
     return (r, g, b)
 
 
-def get_random_font_color(bg_color, contrast_threshold=100):
+def get_random_font_color(
+    bg_color: tuple[int, int, int] | str,
+    contrast_threshold: float = 3.5,
+    max_attempts: int = 100,
+) -> tuple[int, int, int]:
     """Generate a random font color that contrasts with the background color.
-    Font colors are restricted to darker shades closer to black."""
 
-    def luminance(color):
+    Uses WCAG 2.1 contrast ratio guidelines for better readability.
+
+    Args:
+        bg_color: Background color as RGB tuple or color name string
+        contrast_threshold: Minimum contrast ratio (WCAG recommends 4.5 for normal text, we use 3.5 here to make it more challenging)
+        max_attempts: Maximum attempts to find a suitable color
+
+    Returns:
+        RGB tuple representing the font color
+    """
+
+    def luminance(color: tuple[int, int, int]) -> float:
+        """Calculate relative luminance per WCAG 2.1 specification."""
         r, g, b = color
-        return 0.299 * r + 0.587 * g + 0.114 * b
+        # Normalize to 0-1 range
+        r, g, b = r / 255.0, g / 255.0, b / 255.0
+        # Apply gamma correction
+        r = r / 12.92 if r <= 0.03928 else ((r + 0.055) / 1.055) ** 2.4
+        g = g / 12.92 if g <= 0.03928 else ((g + 0.055) / 1.055) ** 2.4
+        b = b / 12.92 if b <= 0.03928 else ((b + 0.055) / 1.055) ** 2.4
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+    def contrast_ratio(lum1: float, lum2: float) -> float:
+        """Calculate contrast ratio between two luminance values."""
+        lighter = max(lum1, lum2)
+        darker = min(lum1, lum2)
+        return (lighter + 0.05) / (darker + 0.05)
+
+    # Convert bg_color to RGB tuple if it's a string
+    if isinstance(bg_color, str):
+        bg_color = ImageColor.getrgb(bg_color)
 
     bg_lum = luminance(bg_color)
 
-    while True:
-        # Restrict RGB values to 0-80 range for darker colors closer to black
-        r = random.randint(0, 80)
-        g = random.randint(0, 80)
-        b = random.randint(0, 80)
+    # Try a few common high-contrast options first
+    candidates = [(0, 0, 0), (255, 255, 255), (50, 50, 50), (230, 230, 230)]
+    for font_color in candidates:
+        font_lum = luminance(font_color)
+        if contrast_ratio(bg_lum, font_lum) >= contrast_threshold:
+            return font_color
+
+    # Fall back to random generation with timeout
+    for _ in range(max_attempts):
+        r = random.randint(0, 255)
+        g = random.randint(0, 255)
+        b = random.randint(0, 255)
         font_color = (r, g, b)
         font_lum = luminance(font_color)
-        if abs(bg_lum - font_lum) >= contrast_threshold:
+        if contrast_ratio(bg_lum, font_lum) >= contrast_threshold:
             return font_color
+
+    # If no suitable color found, return black or white based on background luminance
+    return (0, 0, 0) if bg_lum > 0.5 else (255, 255, 255)
 
 
 def split_long_text(text: str, max_length: int) -> list[str]:
@@ -248,90 +351,6 @@ def split_long_text(text: str, max_length: int) -> list[str]:
         chunks.append(current_chunk.strip())
 
     return chunks
-
-
-def check_font_supports_char(fontpath: str | Path, unicode_char: str) -> bool:
-    """
-    Check if a font supports a specific unicode character.
-    Args:
-        fontpath (str or Path): Path to the font file
-        unicode_char (str): The unicode character to check
-    Returns:
-        bool: True if the font supports the character, False otherwise
-    """
-    font = TTFont(fontpath)  # specify the path to the font in question
-
-    cmap_table = font.get("cmap")
-    if cmap_table is None:
-        return False
-
-    for cmap in cmap_table.tables:
-        if cmap.isUnicode():
-            if ord(unicode_char) in cmap.cmap:
-                return True
-    return False
-
-
-@lru_cache(maxsize=1)
-def get_icelandic_compatible_fonts(font_path: str | None = None) -> tuple[str, ...]:
-    """
-    Scan common font directories for fonts that support Icelandic characters.
-    Results are cached to avoid rescanning on subsequent calls.
-    Returns:
-        tuple of str: Paths to fonts that support Icelandic characters
-    """
-    font_dirs = []
-
-    # load fonts from font directory
-    if font_path is not None:
-        logger.info("Using provided font path: %s", font_path)
-        font_dirs = [font_path]
-    else:
-        logger.info("No font path provided, scanning common system font directories.")
-
-    random.seed(42)  # For reproducibility
-
-    # Check common font directories based on OS
-    current_os = sys.platform
-
-    # Macos
-    if current_os.startswith("darwin"):
-        font_dirs += [
-            "/System/Library/Fonts",
-            "/System/Library/Fonts/Supplemental",
-        ]
-    # Linux
-    if current_os.startswith("linux"):
-        font_dirs += [
-            "/usr/share/fonts",
-            "/usr/local/share/fonts",
-        ]
-    # Windows
-    if current_os.startswith("win"):
-        font_dirs += [
-            str(Path.home() / "AppData/Local/Microsoft/Windows/Fonts"),
-            str(Path.home() / "AppData/Roaming/Microsoft/Windows/Fonts"),
-            "C:/Windows/Fonts",
-        ]
-
-    logger.info("Searching for fonts in directories: %s", font_dirs)
-
-    available_fonts: list[str] = []
-    characters_to_check = "ÁáÐðÉéÍíÓóÚúÝýÞþÆæÖö"
-    for font_dir in tqdm(font_dirs, desc="Scanning font directories"):
-        font_path = Path(font_dir)
-        if font_path.exists() and font_path.is_dir():
-            for font_file in font_path.rglob("*.[tT][tT][fF]"):
-                # Check if font supports ALL required characters
-                if all(
-                    check_font_supports_char(font_file, char)
-                    for char in characters_to_check
-                ):
-                    available_fonts.append(str(font_file))
-
-    logger.info("Found %d Icelandic-compatible fonts.", len(available_fonts))
-
-    return tuple(available_fonts)
 
 
 def _normalize_range(
@@ -394,10 +413,20 @@ def generate_single_text(
             if cfg.use_random_fonts and available_fonts:
                 current_font_path = random.choice(available_fonts)
 
-            # Select random background color if enabled
+            # Select random background colors if enabled
+            # paper_bg_color: for initial text rendering
+            # composite_bg_color: for final RGB composite
             current_bg_color = bg_color
+            composite_bg_color = bg_color
             if cfg.use_random_backgrounds:
                 current_bg_color = get_random_background_color()
+                # Generate a separate color for final composite
+                composite_bg_color = get_random_background_color()
+
+            # Select random paper texture if enabled
+            paper_texture_path = None
+            if cfg.use_paper_textures and cfg.available_paper_textures:
+                paper_texture_path = random.choice(cfg.available_paper_textures)
 
             # Select random font color if enabled
             if cfg.use_random_font_colors:
@@ -437,6 +466,76 @@ def generate_single_text(
                 num_columns=num_columns,
                 column_gap=cfg.column_gap,
                 column_width=column_width,
+                paper_texture_path=paper_texture_path,
+            )
+
+            # Decide whether to use a background image
+            use_background = False
+            background_has_shadow = True
+            background_path = None
+
+            if cfg.use_background_images and (
+                cfg.available_no_shadow_backgrounds
+                or cfg.available_with_shadow_backgrounds
+            ):
+                # Use background based on probability
+                if random.random() < cfg.background_image_probability:
+                    use_background = True
+                    # Choose background type (with/without shadow)
+                    all_backgrounds = []
+                    if cfg.available_with_shadow_backgrounds:
+                        all_backgrounds.extend(
+                            [(bg, True) for bg in cfg.available_with_shadow_backgrounds]
+                        )
+                    if cfg.available_no_shadow_backgrounds:
+                        all_backgrounds.extend(
+                            [(bg, False) for bg in cfg.available_no_shadow_backgrounds]
+                        )
+
+                    if all_backgrounds:
+                        background_path, background_has_shadow = random.choice(
+                            all_backgrounds
+                        )
+
+            # Apply transformations with the appropriate pipeline
+            transformed_image, transformation_meta, transformed_paragraph_bboxes = (
+                apply_random_transformation(
+                    image,
+                    current_bg_color,
+                    paragraph_bboxes=paragraph_bboxes,
+                    use_background=use_background,
+                    background_has_shadow=background_has_shadow,
+                )
+            )
+
+            # Apply background image if selected
+            if use_background and background_path:
+                transformed_image, bg_meta, transformed_paragraph_bboxes = (
+                    apply_background_image(
+                        transformed_image,
+                        background_path,
+                        paragraph_bboxes=transformed_paragraph_bboxes,
+                    )
+                )
+                # Add background metadata to transformations
+                transformation_meta.append({"transformation": "background", **bg_meta})
+
+            # Final composite: Convert RGBA to RGB by pasting on a new background
+            # This happens after all transformations and background application
+            if transformed_image.mode == "RGBA":
+                # Create RGB background with the composite color
+                rgb_background = Image.new(
+                    "RGB", transformed_image.size, composite_bg_color
+                )
+                # Paste RGBA image using its alpha channel as mask
+                rgb_background.paste(transformed_image, (0, 0), transformed_image)
+                transformed_image = rgb_background
+            elif transformed_image.mode != "RGB":
+                # Fallback: convert to RGB
+                transformed_image = transformed_image.convert("RGB")
+
+            transformed_image = _visualise_bboxes(
+                transformed_image, transformed_paragraph_bboxes, show_labels=False
             )
 
             if not fitted_text:
@@ -470,7 +569,7 @@ def generate_single_text(
                     text_vertical_alignment=vertical_alignment,
                     text_horizontal_alignment=alignment,
                     paragraph_bboxes=transformed_paragraph_bboxes,
-                    transformation=transformation_meta,
+                    transformations=transformation_meta,
                 )
             )
 
@@ -522,9 +621,54 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     # fix number of examples to generate if specified
     num_examples = cfg.num_examples if cfg.num_examples > 0 else len(texts)
 
+    # Check for Google Fonts API key and sync fonts if available
+    google_fonts_api_key = os.environ.get("GOOGLE_FONTS_API_KEY")
+    if google_fonts_api_key:
+        logger.info("GOOGLE_FONTS_API_KEY found, syncing Google Fonts...")
+        sync_google_fonts(google_fonts_api_key, cfg.google_fonts_directory)
+    else:
+        logger.warning(
+            "GOOGLE_FONTS_API_KEY environment variable not set. "
+            "Skipping Google Fonts sync and using only system fonts."
+        )
+
     available_fonts = None
     if cfg.use_random_fonts:
-        available_fonts = get_icelandic_compatible_fonts(cfg.font_path)
+        available_fonts = get_compatible_fonts(
+            language_code=cfg.language_code,
+            use_cache=cfg.use_font_cache,
+            cache_dir=cfg.font_cache_dir,
+            google_fonts_directory=cfg.google_fonts_directory,
+        )
+
+    available_paper_textures = None
+    if cfg.use_paper_textures:
+        available_paper_textures = discover_paper_textures(cfg.paper_textures_dir)
+        if available_paper_textures:
+            logger.info(
+                f"Found {len(available_paper_textures)} paper textures in {cfg.paper_textures_dir}"
+            )
+        else:
+            logger.warning(
+                f"No paper textures found in {cfg.paper_textures_dir}, falling back to solid colors"
+            )
+
+    available_no_shadow_backgrounds = []
+    available_with_shadow_backgrounds = []
+    if cfg.use_background_images:
+        available_no_shadow_backgrounds, available_with_shadow_backgrounds = (
+            discover_backgrounds(cfg.backgrounds_dir)
+        )
+        logger.info(
+            f"Found {len(available_no_shadow_backgrounds)} no-shadow backgrounds and {len(available_with_shadow_backgrounds)} with-shadow backgrounds"
+        )
+        if (
+            not available_no_shadow_backgrounds
+            and not available_with_shadow_backgrounds
+        ):
+            logger.warning(
+                f"No backgrounds found in {cfg.backgrounds_dir}, will not use background images"
+            )
 
     column_range = _normalize_range(cfg.min_num_columns, cfg.max_num_columns, minimum=1)
     column_width_range = _normalize_range(
@@ -535,6 +679,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     generation_cfg = GenerationConfig(
         **asdict(cfg),
         available_fonts=available_fonts,
+        available_paper_textures=available_paper_textures,
+        available_no_shadow_backgrounds=available_no_shadow_backgrounds,
+        available_with_shadow_backgrounds=available_with_shadow_backgrounds,
         column_range=column_range,
         column_width_range=column_width_range,
         font_size_range=font_size_range,
@@ -596,7 +743,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                         image_data.text_horizontal_alignment
                     )
                     new_data["paragraph_bboxes"].append(image_data.paragraph_bboxes)
-                    new_data["transformation"].append(image_data.transformation)
+                    new_data["transformations"].append(image_data.transformations)
 
                 # Flush batch to disk when threshold reached to avoid OOM
                 if len(new_data["image"]) >= batch_size:
@@ -727,6 +874,21 @@ def create_image_dataset(cfg: DataConfig) -> None:
         logger.info("Pushing dataset to the hub at %s...", cfg.hub_repo_id)
         dataset_dict.push_to_hub(cfg.hub_repo_id)
         logger.info("Dataset pushed to the hub successfully.")
+
+    if cfg.local_output_dir:
+        local_output_path = Path(cfg.local_output_dir)
+        local_output_path.mkdir(parents=True, exist_ok=True)
+
+        for split, items in final_dataset.items():
+            split_path = local_output_path / split
+
+            split_path.mkdir(parents=True, exist_ok=True)
+            for idx, item in enumerate(items):
+                image: PILImage.Image = item["image"]
+                image_save_path = split_path / f"image_{idx:05d}.png"
+                image.save(image_save_path)
+
+        logger.info(f"Image dataset also saved to local directory {local_output_path}")
 
 
 def main() -> None:
