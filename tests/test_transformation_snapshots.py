@@ -167,7 +167,7 @@ class TestRotateSnapshots:
         angle = 3.5
         from ocr_icelandic.transformations.rotate import _rotate_within_bounds
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta = _rotate_within_bounds(image, angle)
 
         # Import transform function to get transformed bboxes
         from ocr_icelandic.transformations.rotate import (
@@ -197,7 +197,7 @@ class TestRotateSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
@@ -217,7 +217,7 @@ class TestRotateSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
@@ -244,7 +244,7 @@ class TestSkewSnapshots:
             _transform_paragraph_bboxes_for_skew,
         )
 
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
+        skewed_img, meta = _skew_within_bounds(image, dx)
         transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
 
         assert snapshot_png == skewed_img
@@ -262,7 +262,7 @@ class TestSkewSnapshots:
             _transform_paragraph_bboxes_for_skew,
         )
 
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
+        skewed_img, meta = _skew_within_bounds(image, dx)
         transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
 
         assert snapshot_png == skewed_img
@@ -280,7 +280,7 @@ class TestSkewSnapshots:
             _transform_paragraph_bboxes_for_skew,
         )
 
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
+        skewed_img, meta = _skew_within_bounds(image, dx)
         transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
 
         assert snapshot_png == skewed_img
@@ -300,7 +300,7 @@ class TestSkewSnapshots:
             _transform_paragraph_bboxes_for_skew,
         )
 
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
+        skewed_img, meta = _skew_within_bounds(image, dx)
         transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
 
         assert snapshot_png == skewed_img
@@ -327,7 +327,7 @@ class TestPerspectiveSnapshots:
         )
 
         perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="book_curve"
+            image, distortion_type="book_curve"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -349,7 +349,7 @@ class TestPerspectiveSnapshots:
         )
 
         perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="camera_angle"
+            image, distortion_type="camera_angle"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -371,7 +371,7 @@ class TestPerspectiveSnapshots:
         )
 
         perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="camera_angle"
+            image, distortion_type="camera_angle"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -390,7 +390,7 @@ class TestPerspectiveSnapshots:
         )
 
         perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="combined"
+            image, distortion_type="combined"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -411,7 +411,7 @@ class TestPerspectiveSnapshots:
         )
 
         perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="book_curve"
+            image, distortion_type="book_curve"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -438,7 +438,7 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
@@ -455,7 +455,7 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_skew,
         )
 
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
+        skewed_img, meta = _skew_within_bounds(image, dx)
         transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
 
         assert snapshot_png == skewed_img
@@ -473,7 +473,7 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(small_image, "white", angle)
+        rotated_img, meta = _rotate_within_bounds(small_image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
