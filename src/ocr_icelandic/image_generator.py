@@ -121,9 +121,11 @@ def _resolve_random_settings(cfg: "GenerationConfig") -> dict:
         settings["bg_color"] = get_random_background_color()
         settings["composite_bg_color"] = get_random_background_color()
 
-    # Random paper texture
+    # Random paper texture (based on probability, otherwise use synthetic background with noise)
     if cfg.use_paper_textures and cfg.available_paper_textures:
-        settings["paper_texture_path"] = random.choice(cfg.available_paper_textures)
+        if random.random() < cfg.paper_texture_probability:
+            settings["paper_texture_path"] = random.choice(cfg.available_paper_textures)
+        # else: paper_texture_path remains None, which triggers synthetic background with noise in create_image_with_text
 
     # Random font color (must be after bg_color)
     if cfg.use_random_font_colors:

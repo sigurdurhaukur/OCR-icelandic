@@ -48,6 +48,9 @@ class DataConfig:
     use_random_backgrounds: bool = True
     use_paper_textures: bool = True
     paper_textures_dir: str = "assets/papers"
+    paper_texture_probability: float = (
+        0.5  # Probability of using paper texture vs synthetic background with noise
+    )
     use_background_images: bool = True
     backgrounds_dir: str = "assets/backgrounds"
     background_image_probability: float = 1.0
@@ -56,7 +59,6 @@ class DataConfig:
     apply_random_transformations: bool = True
 
     # Output settings
-    output_path: str = "isl_synthetic_ocr_output"
     local_output_dir: str = "./local_output"
     save_to_disk: bool = False
     push_to_hub: bool = False

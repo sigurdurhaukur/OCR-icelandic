@@ -13,12 +13,13 @@ python scripts/prepare_data.py \
     max_entries=1 \
     column_range="[1,1]" \
     max_workers=1 \
-    output_path="eng_synthetic_ocr_output_v2" \
+    local_output_dir="eng_synthetic_ocr_output_v2" \
     num_examples=1000 \
     push_to_hub=True \
     hub_repo_id="Sigurdur/eng_synthetic_ocr_v2" \
     apply_random_transformations=False \
     google_fonts_directory="./english_fonts" \
+    paper_texture_probability=0.3 \
 
 Generating icelandic synthetic OCR dataset as an example:
 
@@ -30,12 +31,13 @@ python scripts/prepare_data.py \
     max_entries=1 \
     column_range="[1,1]" \
     max_workers=1 \
-    output_path="isl_synthetic_ocr_output_v3" \
+    local_output_dir="isl_synthetic_ocr_output_v3" \
     num_examples=2000 \
     push_to_hub=True \
     hub_repo_id="Sigurdur/isl_synthetic_ocr_v3" \
     apply_random_transformations=False \
     google_fonts_directory="./icelandic_fonts" \
+    paper_texture_probability=0.5 \
 """
 
 import gc
@@ -206,7 +208,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     )
 
     # Batch processing setup
-    batch_dir = Path(cfg.output_path) / "_batches"
+    batch_dir = Path(cfg.local_output_dir) / "_batches"
     batch_dir.mkdir(parents=True, exist_ok=True)
     batch_datasets: list[str] = []
     new_data: defaultdict[str, list] = defaultdict(list)
@@ -362,8 +364,8 @@ def create_image_dataset(cfg: DataConfig) -> None:
     # Split and save
     final_splits = create_train_test_val_split(image_dataset)
     dataset_dict = DatasetDict(final_splits)
-    dataset_dict.save_to_disk(cfg.output_path)
-    logger.info("Image dataset saved to %s", cfg.output_path)
+    dataset_dict.save_to_disk(cfg.local_output_dir)
+    logger.info("Image dataset saved to %s", cfg.local_output_dir)
 
     # Optional: show sample
     if cfg.show_sample:

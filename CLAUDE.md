@@ -244,7 +244,6 @@ class DataConfig:
     max_text_length: int = 2000  # chars before splitting
 
     # Output
-    output_path: str = "isl_synthetic_ocr_output"
     local_output_dir: str = "./local_output"
     push_to_hub: bool = False
     hub_repo_id: str = "Sigurdur/isl_synthetic_ocr"
@@ -287,7 +286,7 @@ python scripts/prepare_data.py \
   num_columns=2 \
   use_random_fonts=True \
   use_random_backgrounds=True \
-  output_path=./my_ocr_dataset
+  local_output_dir=./my_ocr_dataset
 ```
 
 #### Push to HuggingFace Hub
@@ -774,7 +773,7 @@ python scripts/prepare_data.py \
   dataset_path=your/text-corpus \
   text_column=text \
   max_entries=10000 \
-  output_path=./synthetic_ocr_data \
+  local_output_dir=./synthetic_ocr_data \
   push_to_hub=True \
   hub_repo_id=username/ocr-dataset
 ```
@@ -899,7 +898,7 @@ python scripts/prepare_data.py \
   max_entries=10000 \
   use_random_fonts=True \
   use_random_backgrounds=True \
-  output_path=./language_ocr_data
+  local_output_dir=./language_ocr_data
 ```
 
 ### Step 4: Fine-tune Model
