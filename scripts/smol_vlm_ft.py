@@ -7,6 +7,7 @@ import numpy as np
 import peft
 import torch
 import transformers
+import wandb
 from datasets import load_dataset
 from helpers import TrainConfig
 from omegaconf import OmegaConf
@@ -17,8 +18,6 @@ from transformers import (
     BitsAndBytesConfig,
     Trainer,
 )
-
-import wandb
 
 # Load metrics once
 wer_metric = evaluate.load("wer")
@@ -45,7 +44,7 @@ def fintune_smolvlm_ocr(cfg: TrainConfig) -> None:
         )  # use the processor from the base model
 
     except Exception as e:
-        logger.error(f"Error loading processor for model {cfg.model.model_id}: {e}")
+        logger.error("Error loading processor for model %s: %s", cfg.model.model_id, e)
         processor = AutoProcessor.from_pretrained("HuggingFaceTB/SmolVLM-Base")
         logger.info("Loaded default processor HuggingFaceTB/SmolVLM-Base")
 

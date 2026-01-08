@@ -42,7 +42,7 @@ def swap_language_model_in_idefics3(
         Idefics3ForConditionalGeneration: The modified Idefics3 model
     """
 
-    logger.info(f"Loading original Idefics3 model: {original_idefics_model_id}")
+    logger.info("Loading original Idefics3 model: %s", original_idefics_model_id)
 
     # Load the original Idefics3 model (this has the vision components we want to keep)
     idefics_model = Idefics3ForConditionalGeneration.from_pretrained(
@@ -50,7 +50,7 @@ def swap_language_model_in_idefics3(
         torch_dtype=torch.bfloat16,
     )
 
-    logger.info(f"Loading our fine-tuned text model: {fine_tuned_text_model_id}")
+    logger.info("Loading our fine-tuned text model: %s", fine_tuned_text_model_id)
 
     # Load our fine-tuned text model
     fine_tuned_model = AutoModel.from_pretrained(
@@ -72,11 +72,13 @@ def swap_language_model_in_idefics3(
 
             # Check if this parameter exists in the Idefics3 text model
             if text_model_key in idefics_model.model.text_model.state_dict():
-                logger.debug(f"Copying {text_model_key}")
+                logger.debug("Copying %s", text_model_key)
                 # Copy the parameter directly
                 idefics_model.model.text_model.state_dict()[text_model_key].copy_(value)
             else:
-                logger.warning(f"Key {text_model_key} not found in Idefics3 text model")
+                logger.warning(
+                    "Key %s not found in Idefics3 text model", text_model_key
+                )
 
         elif key == "lm_head.weight":
             # Update the language model head
@@ -95,7 +97,7 @@ def swap_language_model_in_idefics3(
         tokenizer = AutoTokenizer.from_pretrained(original_idefics_model_id)
         logger.info("Using tokenizer from original Idefics3 model")
 
-    logger.info(f"Saving modified Idefics3 model to: {output_path}")
+    logger.info("Saving modified Idefics3 model to: %s", output_path)
 
     # Save the modified model
     idefics_model.save_pretrained(output_path)
@@ -103,7 +105,7 @@ def swap_language_model_in_idefics3(
 
     # Optionally push to hub
     if push_to_hub and hub_repo_id:
-        logger.info(f"Pushing model to: {hub_repo_id}")
+        logger.info("Pushing model to: %s", hub_repo_id)
         idefics_model.push_to_hub(hub_repo_id)
         tokenizer.push_to_hub(hub_repo_id)
 
@@ -131,7 +133,7 @@ def test_swapped_model(model_path: str) -> None:
     prompt = "Einu sinni var karl og kerling sem bjuggu í"
     inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
 
-    logger.info(f"Testing with prompt: '{prompt}'")
+    logger.info("Testing with prompt: '%s'", prompt)
 
     with torch.no_grad():
         outputs = model.generate(
@@ -145,16 +147,16 @@ def test_swapped_model(model_path: str) -> None:
         )
 
     generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    logger.info(f"Generated text: {generated_text}")
+    logger.info("Generated text: %s", generated_text)
 
     # Test that the model still loads properly as Idefics3
     logger.info("Verifying model structure...")
-    logger.info(f"Model type: {type(model)}")
+    logger.info("Model type: %s", type(model))
     logger.info(
         f"Has vision model: {hasattr(model, 'vision_model') or hasattr(model.model, 'vision_model')}"
     )
-    logger.info(f"Has text model: {hasattr(model.model, 'text_model')}")
-    logger.info(f"Has lm_head: {hasattr(model, 'lm_head')}")
+    logger.info("Has text model: %s", hasattr(model.model, "text_model"))
+    logger.info("Has lm_head: %s", hasattr(model, "lm_head"))
 
     logger.info("Test complete - model structure looks good!")
 
@@ -220,9 +222,9 @@ def compare_before_after(
         outputs_modified[0], skip_special_tokens=True
     )
 
-    logger.info(f"Prompt: '{test_prompt}'")
-    logger.info(f"Original model output: {original_text}")
-    logger.info(f"Modified model output: {modified_text}")
+    logger.info("Prompt: '%s'", test_prompt)
+    logger.info("Original model output: %s", original_text)
+    logger.info("Modified model output: %s", modified_text)
 
 
 def main():

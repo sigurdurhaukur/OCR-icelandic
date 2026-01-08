@@ -318,7 +318,7 @@ def save_local_images(dataset_splits: dict, output_dir: str) -> None:
             image: PILImage.Image = item["image"]
             image.save(split_path / f"image_{idx:05d}.png")
 
-    logger.info(f"Images saved to {local_path}")
+    logger.info("Images saved to %s", local_path)
 
 
 def display_sample(dataset: dict) -> None:

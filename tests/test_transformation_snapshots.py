@@ -6,17 +6,17 @@ Run with: pytest tests/test_transformation_snapshots.py
 Update snapshots: pytest tests/test_transformation_snapshots.py --snapshot-update
 """
 
-import random
 import io
+import random
 from typing import Any
-from PIL import Image
+
 import pytest
+from PIL import Image
 from syrupy.assertion import SnapshotAssertion
 from syrupy.extensions.amber import AmberSnapshotExtension
 from syrupy.extensions.single_file import SingleFileSnapshotExtension, WriteMode
 
 from ocr_icelandic.utils import create_image_with_text
-
 
 # ============================================================================
 # Custom Syrupy Extension for PIL Images
