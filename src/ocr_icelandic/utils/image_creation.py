@@ -159,6 +159,7 @@ def create_image_with_text(
     total_gap = column_gap * (num_columns - 1)
     block_width = column_width * num_columns + total_gap
     margin_x = max(0, (scaled_image_size[0] - block_width) // 2)
+    margin_y = 10  # Small top/bottom margin
 
     line_height = (
         draw.textbbox((0, 0), "Ag", font=font)[3]
@@ -167,7 +168,11 @@ def create_image_with_text(
     line_spacing = int(line_height * 0.2)
     effective_line_height = line_height + line_spacing
     max_lines_per_column = int(
-        max(1, (scaled_image_size[1] - line_height) // effective_line_height + 1)
+        max(
+            1,
+            (scaled_image_size[1] - 2 * margin_y - line_height) // effective_line_height
+            + 1,
+        )
     )
 
     placements, column_counts = arrange_lines_in_columns(
