@@ -95,19 +95,67 @@ def textured_stains(
     pos_x = random.randint(-stain.width // 2, image.width - stain.width // 2)
     pos_y = random.randint(-stain.height // 2, image.height - stain.height // 2)
 
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    overlay.paste(stain, (pos_x, pos_y), stain)
-
     # Ensure image is RGBA
     if image.mode != "RGBA":
         image = image.convert("RGBA")
-    combined = Image.alpha_composite(image, overlay)
+
+    # Apply multiply blending for more realistic stain effect
+    # Multiply blend: result = (paper * stain) / 255
+    # This makes stains naturally darken the paper while texture shows through
+    img_array = np.array(image, dtype=np.float32)
+
+    # Create a full-size stain layer with white (neutral for multiply) background
+    stain_layer = np.ones((image.height, image.width, 4), dtype=np.float32) * 255.0
+    stain_alpha_layer = np.zeros((image.height, image.width), dtype=np.float32)
+
+    # Calculate the region where stain overlaps with image
+    stain_x1 = max(0, pos_x)
+    stain_y1 = max(0, pos_y)
+    stain_x2 = min(image.width, pos_x + stain.width)
+    stain_y2 = min(image.height, pos_y + stain.height)
+
+    # Corresponding region in stain texture
+    tex_x1 = max(0, -pos_x)
+    tex_y1 = max(0, -pos_y)
+    tex_x2 = tex_x1 + (stain_x2 - stain_x1)
+    tex_y2 = tex_y1 + (stain_y2 - stain_y1)
+
+    # Get stain data as numpy
+    stain_array = np.array(stain, dtype=np.float32)
+
+    # Copy stain RGB and alpha to full-size layers
+    if stain_x2 > stain_x1 and stain_y2 > stain_y1:
+        stain_layer[stain_y1:stain_y2, stain_x1:stain_x2, :3] = stain_array[
+            tex_y1:tex_y2, tex_x1:tex_x2, :3
+        ]
+        stain_alpha_layer[stain_y1:stain_y2, stain_x1:stain_x2] = (
+            stain_array[tex_y1:tex_y2, tex_x1:tex_x2, 3] / 255.0
+        )
+
+    # Apply multiply blend for RGB channels
+    # Where stain is present (alpha > 0), blend = (img * stain) / 255
+    # Where stain is absent (alpha = 0), result = original
+    multiplied = (img_array[:, :, :3] * stain_layer[:, :, :3]) / 255.0
+
+    # Blend based on stain alpha: result = multiplied * alpha + original * (1 - alpha)
+    result = np.zeros_like(img_array)
+    for c in range(3):
+        result[:, :, c] = multiplied[:, :, c] * stain_alpha_layer + img_array[
+            :, :, c
+        ] * (1 - stain_alpha_layer)
+    # Preserve original alpha channel
+    result[:, :, 3] = img_array[:, :, 3]
+
+    result = np.clip(result, 0, 255).astype(np.uint8)
+    combined = Image.fromarray(result, mode="RGBA")
+
     return (
         combined,
         {
             "transformation": "coffee_stains",
             "position": (pos_x, pos_y),
             "scale_factor": round(scale_factor, 2),
+            "blend_mode": "multiply",
         },
         paragraph_bboxes_copy,
     )

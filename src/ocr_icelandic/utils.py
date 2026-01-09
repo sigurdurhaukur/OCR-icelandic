@@ -2,7 +2,133 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
+
+def _color_to_rgb(color: str | tuple[int, int, int]) -> tuple[int, int, int]:
+    """Convert a color string or tuple to RGB tuple."""
+    if isinstance(color, tuple):
+        return color[:3]
+    temp = Image.new("RGB", (1, 1), color)
+    return temp.getpixel((0, 0))
+
+
+def _calculate_luminance(color: tuple[int, int, int]) -> float:
+    """Calculate perceived luminance of a color (0-255 scale)."""
+    return 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]
+
+
+def _is_grayscale(color: tuple[int, int, int], threshold: int = 30) -> bool:
+    """Check if a color is grayscale (low saturation)."""
+    r, g, b = color
+    avg = (r + g + b) / 3
+    return all(abs(c - avg) < threshold for c in [r, g, b])
+
+
+def get_blend_mode(
+    font_color: str | tuple[int, int, int],
+    bg_color: str | tuple[int, int, int],
+) -> str:
+    """
+    Determine the appropriate blending mode based on font and background colors.
+
+    Args:
+        font_color: Color of the text
+        bg_color: Background color
+
+    Returns:
+        Blending mode: "multiply", "screen", or "normal"
+        - multiply: Dark text on light background (makes paper texture visible through text)
+        - screen: Light text on dark background (makes paper texture visible through text)
+        - normal: Colored text on colored background (standard alpha compositing)
+    """
+    font_rgb = _color_to_rgb(font_color)
+    bg_rgb = _color_to_rgb(bg_color)
+
+    font_lum = _calculate_luminance(font_rgb)
+    bg_lum = _calculate_luminance(bg_rgb)
+
+    # Thresholds for determining "dark" vs "light"
+    dark_threshold = 100
+    light_threshold = 155
+
+    # Check if colors are grayscale
+    font_is_gray = _is_grayscale(font_rgb)
+
+    # Dark text on light background → multiply
+    if font_lum < dark_threshold and bg_lum > light_threshold and font_is_gray:
+        return "multiply"
+    # Light text on dark background → screen
+    elif font_lum > light_threshold and bg_lum < dark_threshold and font_is_gray:
+        return "screen"
+    # Colored text on colored background → normal
+    else:
+        return "normal"
+
+
+def blend_text_layer(
+    background: Image.Image,
+    text_mask: Image.Image,
+    font_color: tuple[int, int, int],
+    blend_mode: str,
+) -> Image.Image:
+    """
+    Blend a text layer onto a background using the specified blending mode.
+
+    This function applies text with paper texture showing through, simulating
+    realistic printed or handwritten text on textured paper.
+
+    Args:
+        background: The background image (with paper texture)
+        text_mask: Grayscale mask where text is white (255) and non-text is black (0)
+        font_color: RGB tuple of the font color
+        blend_mode: "multiply", "screen", or "normal"
+            - multiply: Dark text on light background (paper texture shines through)
+            - screen: Light text on dark background (paper texture shines through)
+            - normal: Standard alpha compositing for colored text
+
+    Returns:
+        Blended image with text showing paper texture through it
+    """
+    # Convert to numpy for blending calculations
+    bg_array = np.array(background, dtype=np.float32)
+    mask_array = np.array(text_mask, dtype=np.float32) / 255.0
+
+    if blend_mode == "multiply":
+        # Multiply blend: result = (A * B) / 255
+        # For dark text on light background
+        # Create a layer where text areas have font_color and non-text areas are white (neutral for multiply)
+        text_array = np.ones_like(bg_array) * 255.0
+        for c in range(3):
+            text_array[:, :, c] = font_color[c] * mask_array + 255.0 * (1 - mask_array)
+
+        # Apply multiply blend
+        result = (bg_array * text_array) / 255.0
+
+    elif blend_mode == "screen":
+        # Screen blend: result = 255 - ((255 - A) * (255 - B)) / 255
+        # For light text on dark background
+        # Create a layer where text areas have font_color and non-text areas are black (neutral for screen)
+        text_array = np.zeros_like(bg_array)
+        for c in range(3):
+            text_array[:, :, c] = font_color[c] * mask_array
+
+        # Apply screen blend
+        result = 255.0 - ((255.0 - bg_array) * (255.0 - text_array)) / 255.0
+
+    else:  # normal
+        # Normal blend: standard alpha compositing
+        # Text replaces background where mask is white
+        result = bg_array.copy()
+        for c in range(3):
+            result[:, :, c] = font_color[c] * mask_array + bg_array[:, :, c] * (
+                1 - mask_array
+            )
+
+    # Clip to valid range and convert back to PIL
+    result = np.clip(result, 0, 255).astype(np.uint8)
+    return Image.fromarray(result, mode="RGB")
 
 
 def load_font(
@@ -591,6 +717,10 @@ def create_image_with_text(
         margin_x + c * (column_width + column_gap) for c in range(num_columns)
     ]
 
+    # Create a text mask layer (grayscale: black background, white text for antialiasing)
+    text_mask = Image.new("L", scaled_image_size, color=0)
+    mask_draw = ImageDraw.Draw(text_mask)
+
     paragraph_bboxes_map: dict[int, dict] = {}
     actual_text_lines: list[str] = []
 
@@ -612,10 +742,12 @@ def create_image_with_text(
 
         x_position_int = int(x_position)
         y_position_int = int(y_position)
-        draw.text(
+
+        # Draw text on the mask layer (white text on black background)
+        mask_draw.text(
             (x_position_int, y_position_int),
             placement.text,
-            fill=font_color,
+            fill=255,  # White for mask
             font=font,
         )
 
@@ -642,6 +774,27 @@ def create_image_with_text(
                 "column": placement.column_index,
                 "bbox": line_bbox,
             }
+
+    # Apply blending mode to combine text with background
+    # Convert font_color to RGB tuple
+    font_rgb = _color_to_rgb(font_color)
+
+    # Determine the appropriate blend mode
+    blend_mode = get_blend_mode(font_color, bg_color)
+
+    # Convert background to RGB for blending
+    background_rgb = image.convert("RGB")
+
+    # Blend text layer with background using the appropriate mode
+    blended_image = blend_text_layer(
+        background=background_rgb,
+        text_mask=text_mask,
+        font_color=font_rgb,
+        blend_mode=blend_mode,
+    )
+
+    # Convert back to RGBA
+    image = blended_image.convert("RGBA")
 
     while actual_text_lines and not actual_text_lines[-1].strip():
         actual_text_lines.pop()
