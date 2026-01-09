@@ -306,6 +306,54 @@ def discover_backgrounds(
     return sorted(no_shadow_paths), sorted(with_shadow_paths)
 
 
+def _create_paper_drop_shadow(
+    foreground: Image.Image,
+    max_offset: int = 3,
+    max_blur: int = 5,
+    shadow_opacity: int = 80,
+) -> tuple[Image.Image, tuple[int, int]]:
+    """
+    Create a drop shadow for the paper along 2-3 edges.
+
+    Args:
+        foreground: The paper image (RGBA with alpha channel defining shape)
+        max_offset: Maximum shadow offset in pixels
+        max_blur: Maximum blur radius for the shadow
+        shadow_opacity: Base opacity of the shadow (0-255)
+
+    Returns:
+        Tuple of (shadow image RGBA, shadow offset (x, y))
+    """
+    from PIL import ImageFilter
+
+    # Random shadow offset (small, 1-3 pixels)
+    offset_x = random.randint(1, max_offset)
+    offset_y = random.randint(1, max_offset)
+
+    # Random blur radius (small, 2-5 pixels)
+    blur_radius = random.uniform(2, max_blur)
+
+    # Random opacity variation
+    opacity = random.randint(int(shadow_opacity * 0.7), shadow_opacity)
+
+    # Create shadow from foreground alpha channel
+    if foreground.mode == "RGBA":
+        alpha = foreground.split()[3]
+    else:
+        # If no alpha, create a solid mask
+        alpha = Image.new("L", foreground.size, 255)
+
+    # Create shadow layer (black with alpha from foreground)
+    shadow = Image.new("RGBA", foreground.size, (0, 0, 0, 0))
+    shadow_alpha = alpha.point(lambda p: int(p * opacity / 255))
+    shadow.putalpha(shadow_alpha)
+
+    # Apply blur
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    return shadow, (offset_x, offset_y)
+
+
 def apply_background_image(
     foreground: Image.Image,
     background_path: str,
@@ -355,8 +403,14 @@ def apply_background_image(
             y = (bg_height - fg_height) // 2
             position = (x, y)
 
-        # Create composite
+        # Create drop shadow for the paper
+        shadow, shadow_offset = _create_paper_drop_shadow(foreground)
+        shadow_x = position[0] + shadow_offset[0]
+        shadow_y = position[1] + shadow_offset[1]
+
+        # Create composite: first paste shadow, then paper
         composite = background.copy()
+        composite.paste(shadow, (shadow_x, shadow_y), shadow)
         composite.paste(foreground, position, foreground)
 
         # Convert back to RGB
@@ -383,6 +437,7 @@ def apply_background_image(
             "position": position,
             "background_size": (bg_width, bg_height),
             "crop_offset": (crop_x, crop_y),
+            "drop_shadow_offset": shadow_offset,
         }
 
         return composite, metadata, paragraph_bboxes_copy
