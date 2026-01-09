@@ -1,0 +1,183 @@
+"""Text wrapping and column layout utilities."""
+
+from dataclasses import dataclass
+
+from PIL import ImageDraw, ImageFont
+
+
+@dataclass
+class WrappedParagraph:
+    """Represents a paragraph after text wrapping."""
+
+    lines: list[str]
+    text: str
+    has_text: bool
+
+
+@dataclass
+class WrapResult:
+    """Result of text wrapping operation."""
+
+    paragraphs: list[WrappedParagraph]
+    has_overflow: bool
+
+
+@dataclass
+class LinePlacement:
+    """Placement information for a single line of text."""
+
+    text: str
+    paragraph_index: int | None
+    column_index: int
+    line_index: int
+    is_blank: bool
+
+
+def wrap_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    max_width: int,
+    tab_width: int = 4,
+) -> WrapResult:
+    """Wrap each paragraph to fit within the given width.
+
+    Args:
+        draw: ImageDraw instance for measuring text
+        text: Text to wrap
+        font: Font to use for text measurement
+        max_width: Maximum width in pixels
+        tab_width: Number of spaces to replace tabs with
+
+    Returns:
+        WrapResult containing wrapped paragraphs and overflow flag
+    """
+    paragraphs = text.split("\n")
+    wrapped_paragraphs: list[WrappedParagraph] = []
+    has_overflow = False
+
+    for paragraph in paragraphs:
+        stripped_paragraph = paragraph.strip()
+        if not stripped_paragraph:
+            wrapped_paragraphs.append(
+                WrappedParagraph(lines=[], text="", has_text=False)
+            )
+            continue
+
+        leading_whitespace = ""
+        left_stripped = paragraph.lstrip()
+        if len(paragraph) > len(left_stripped):
+            leading_whitespace = paragraph[: len(paragraph) - len(left_stripped)]
+            leading_whitespace = leading_whitespace.replace("\t", " " * tab_width)
+
+        left_stripped = left_stripped.replace("\t", " " * tab_width)
+        words = left_stripped.split()
+        paragraph_lines: list[str] = []
+        current_line: list[str] = []
+        is_first_line = True
+
+        for word in words:
+            test_line_base = " ".join(current_line + [word])
+            test_line = (
+                leading_whitespace + test_line_base if is_first_line else test_line_base
+            )
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            test_width = bbox[2] - bbox[0]
+
+            if test_width <= max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    paragraph_lines.append(
+                        (leading_whitespace if is_first_line else "")
+                        + " ".join(current_line)
+                    )
+                    is_first_line = False
+                current_line = [word]
+                test_line_base = " ".join(current_line)
+                test_line = (
+                    leading_whitespace + test_line_base
+                    if is_first_line
+                    else test_line_base
+                )
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                if bbox[2] - bbox[0] > max_width:
+                    # Word is too long to fit on a line - mark as overflow
+                    has_overflow = True
+                    paragraph_lines.append(
+                        (leading_whitespace if is_first_line else "") + word
+                    )
+                    is_first_line = False
+                    current_line = []
+
+        if current_line:
+            paragraph_lines.append(
+                (leading_whitespace if is_first_line else "") + " ".join(current_line)
+            )
+
+        wrapped_paragraphs.append(
+            WrappedParagraph(
+                lines=paragraph_lines, text=stripped_paragraph, has_text=True
+            )
+        )
+
+    return WrapResult(paragraphs=wrapped_paragraphs, has_overflow=has_overflow)
+
+
+def arrange_lines_in_columns(
+    paragraphs: list[WrappedParagraph],
+    max_lines_per_column: int,
+    num_columns: int,
+) -> tuple[list[LinePlacement], list[int]]:
+    """Arrange wrapped paragraphs into columns.
+
+    Args:
+        paragraphs: List of wrapped paragraphs
+        max_lines_per_column: Maximum lines that fit in a column
+        num_columns: Number of columns
+
+    Returns:
+        Tuple of (line placements, column line counts)
+    """
+    placements: list[LinePlacement] = []
+    column_counts = [0] * num_columns
+    current_column = 0
+
+    def advance_column() -> None:
+        nonlocal current_column
+        while (
+            current_column < num_columns
+            and column_counts[current_column] >= max_lines_per_column
+        ):
+            current_column += 1
+
+    def add_line(text: str, paragraph_index: int | None, is_blank: bool) -> bool:
+        nonlocal current_column
+        advance_column()
+        if current_column >= num_columns:
+            return False
+        placements.append(
+            LinePlacement(
+                text=text,
+                paragraph_index=paragraph_index,
+                column_index=current_column,
+                line_index=column_counts[current_column],
+                is_blank=is_blank,
+            )
+        )
+        column_counts[current_column] += 1
+        return True
+
+    for idx, paragraph in enumerate(paragraphs):
+        if paragraph.has_text:
+            for line in paragraph.lines:
+                if not add_line(line, idx, is_blank=False):
+                    return placements, column_counts
+            if idx < len(paragraphs) - 1:
+                if not add_line("", None, is_blank=True):
+                    return placements, column_counts
+        else:
+            if not add_line("", None, is_blank=True):
+                return placements, column_counts
+
+    return placements, column_counts
