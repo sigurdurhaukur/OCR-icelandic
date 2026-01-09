@@ -222,29 +222,28 @@ class DataConfig:
 
     # Font properties
     font_path: str = "/usr/share/fonts"
-    font_size: int = 12
+    font_size: int | None = None  # Fixed size, or None to use range
+    font_size_range: tuple[int, int] = (11, 24)
     font_color: str = "black"
     use_random_font_colors: bool = True
     use_random_fonts: bool = True
+    use_random_font_sizes: bool = True
     use_random_backgrounds: bool = True
 
     # Text layout
     text_vertical_alignment: str = "center"  # top, middle, bottom
     text_horizontal_alignment: str = "left"  # left, center, right
-    num_columns: int | None = None  # None => random
-    min_num_columns: int = 1
-    max_num_columns: int = 5
+    num_columns: int | None = None  # Fixed count, or None to use range
+    column_range: tuple[int, int] = (1, 5)
     column_gap: int = 20  # pixels between columns
-    column_width: int | None = None  # None => random
-    min_column_width: int = 100
-    max_column_width: int = 512
+    column_width: int | None = None  # Fixed width, or None to use range
+    column_width_range: tuple[int, int] = (100, 512)
 
     # Text processing
     max_length: int = 512
     max_text_length: int = 2000  # chars before splitting
 
     # Output
-    output_path: str = "isl_synthetic_ocr_output"
     local_output_dir: str = "./local_output"
     push_to_hub: bool = False
     hub_repo_id: str = "Sigurdur/isl_synthetic_ocr"
@@ -287,7 +286,7 @@ python scripts/prepare_data.py \
   num_columns=2 \
   use_random_fonts=True \
   use_random_backgrounds=True \
-  output_path=./my_ocr_dataset
+  local_output_dir=./my_ocr_dataset
 ```
 
 #### Push to HuggingFace Hub
@@ -774,7 +773,7 @@ python scripts/prepare_data.py \
   dataset_path=your/text-corpus \
   text_column=text \
   max_entries=10000 \
-  output_path=./synthetic_ocr_data \
+  local_output_dir=./synthetic_ocr_data \
   push_to_hub=True \
   hub_repo_id=username/ocr-dataset
 ```
@@ -899,7 +898,7 @@ python scripts/prepare_data.py \
   max_entries=10000 \
   use_random_fonts=True \
   use_random_backgrounds=True \
-  output_path=./language_ocr_data
+  local_output_dir=./language_ocr_data
 ```
 
 ### Step 4: Fine-tune Model
@@ -1025,7 +1024,7 @@ Simulates real-world document capture variations.
 - Increase image size: `image_width=768 image_height=1024`
 - Reduce font size: `font_size=10`
 - Reduce max_text_length: `max_text_length=1500`
-- Adjust column count: `max_num_columns=3`
+- Adjust column count: `column_range="(1,3)"`
 
 ## Future Enhancement Ideas
 

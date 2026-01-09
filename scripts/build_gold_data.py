@@ -35,13 +35,14 @@ usage:
 python3 build_gold_data.py image_dir=<path_to_images> text_dir=<path_to_texts> output_dir=<path_to_output> push_to_hub=<True/False>
 """
 
-from omegaconf import OmegaConf
-from dataclasses import dataclass
-import pathlib as pl
 import json
 import logging
+import pathlib as pl
 import sys
-from datasets import load_dataset, Dataset, Image
+from dataclasses import dataclass
+
+from datasets import Dataset, Image, load_dataset
+from omegaconf import OmegaConf
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,6 +51,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class BuildConfig:
     image_dir: str = "images"
@@ -57,8 +59,6 @@ class BuildConfig:
     output_dir: str = "my_dataset_repository/train"
     push_to_hub: bool = False
     repo_name: str = "Sigurdur/OCR-Icelandic-benchmark"
-
-
 
 
 def fooberino(cfg: BuildConfig) -> None:
@@ -73,7 +73,9 @@ def fooberino(cfg: BuildConfig) -> None:
     image_files = sorted(list(image_dir.glob("*.jpg")))
     text_files = sorted(list(text_dir.glob("*.txt")))
 
-    assert len(image_files) == len(text_files), "Number of images and text files must be the same"
+    assert len(image_files) == len(text_files), (
+        "Number of images and text files must be the same"
+    )
 
     metadata = []
     for img_path, txt_path in zip(image_files, text_files):
@@ -84,19 +86,19 @@ def fooberino(cfg: BuildConfig) -> None:
         dest_path = output_dir / img_path.name
         if not dest_path.exists():
             dest_path.write_bytes(img_path.read_bytes())
-            logger.info(f"Copied {img_path} to {dest_path}")
+            logger.info("Copied %s to %s", img_path, dest_path)
         else:
-            logger.info(f"{dest_path} already exists, skipping copy.")
+            logger.info("%s already exists, skipping copy.", dest_path)
 
     # write metadata to output_dir/metadata.jsonl
     metadata_path = output_dir / "metadata.jsonl"
     with open(metadata_path, "w", encoding="utf-8") as f:
         for item in metadata:
             f.write(json.dumps(item) + "\n")
-    logger.info(f"Wrote metadata to {metadata_path}")
+    logger.info("Wrote metadata to %s", metadata_path)
 
     if cfg.push_to_hub:
-        logger.info(f"Pushing {cfg.repo_name} to Hugging Face Hub...")
+        logger.info("Pushing %s to Hugging Face Hub...", cfg.repo_name)
 
         # load the dataset with datasets library
         dataset = load_dataset("json", data_files=str(metadata_path))
@@ -113,6 +115,7 @@ def fooberino(cfg: BuildConfig) -> None:
 
         dataset.push_to_hub(cfg.repo_name)
 
+
 def main() -> None:
     """main function"""
     cfg = OmegaConf.structured(BuildConfig)
@@ -122,11 +125,11 @@ def main() -> None:
     try:
         cfg = BuildConfig(**cfg)
     except TypeError as e:  # pylint: disable=broad-exception-raised
-        logger.error(f"Error: {e}\n\nUsage: python scratch.py")
+        logger.error("Error: %s\n\nUsage: python scratch.py", e)
         sys.exit(1)
 
     fooberino(cfg)
 
+
 if __name__ == "__main__":
     main()
-
