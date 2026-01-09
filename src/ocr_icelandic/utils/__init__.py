@@ -20,10 +20,13 @@ from ocr_icelandic.utils.font import load_font
 # Texture and background utilities
 from ocr_icelandic.utils.texture import (
     apply_background_image,
+    apply_displacement_from_texture,
     apply_paper_texture,
     create_paper_drop_shadow,
     discover_backgrounds,
     discover_paper_textures,
+    height_map_to_normal_map,
+    texture_to_height_map,
 )
 
 # Text layout utilities
@@ -62,10 +65,13 @@ __all__ = [
     "load_font",
     # Texture utilities
     "apply_background_image",
+    "apply_displacement_from_texture",
     "apply_paper_texture",
     "create_paper_drop_shadow",
     "discover_backgrounds",
     "discover_paper_textures",
+    "height_map_to_normal_map",
+    "texture_to_height_map",
     # Text layout
     "LinePlacement",
     "WrappedParagraph",

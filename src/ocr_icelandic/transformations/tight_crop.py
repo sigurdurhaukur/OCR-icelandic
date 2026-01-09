@@ -87,8 +87,8 @@ def tight_crop(
             paragraph_bboxes_copy,
         )
 
-    # Add random padding around the text (5% to 15% of text dimensions)
-    pad_ratio = random.uniform(0.05, 0.15)
+    # Add random padding around the text (10% to 25% of text dimensions)
+    pad_ratio = random.uniform(0.1, 0.25)
     pad_x = int(text_width * pad_ratio)
     pad_y = int(text_height * pad_ratio)
 

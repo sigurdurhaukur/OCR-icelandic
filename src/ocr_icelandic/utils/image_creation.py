@@ -12,7 +12,10 @@ from ocr_icelandic.utils.text_layout import (
     arrange_lines_in_columns,
     wrap_text,
 )
-from ocr_icelandic.utils.texture import apply_paper_texture
+from ocr_icelandic.utils.texture import (
+    apply_displacement_from_texture,
+    apply_paper_texture,
+)
 
 
 def create_image_with_text(
@@ -31,6 +34,9 @@ def create_image_with_text(
     column_gap: int = 20,
     column_width: int | None = None,
     paper_texture_path: str | None = None,
+    apply_displacement: bool = False,
+    displacement_strength: float = 2.0,
+    displacement_lighting: bool = True,
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -51,6 +57,10 @@ def create_image_with_text(
         column_gap: Gap in pixels between columns
         column_width: Fixed pixel width for each column (None to auto-size)
         paper_texture_path: Optional path to paper texture image to use as background
+        apply_displacement: If True and paper_texture_path is provided, warp text to follow
+            the paper's folds/creases using displacement mapping
+        displacement_strength: Pixel displacement multiplier (1.0-5.0 typical)
+        displacement_lighting: If True, apply lighting effects based on paper surface normals
 
     Returns:
         tuple: (PIL Image object, string of text that actually fits in the image, paragraph bounding boxes)
@@ -256,6 +266,15 @@ def create_image_with_text(
         font_color=font_rgb,
         blend_mode=blend_mode,
     )
+
+    # Apply displacement mapping if enabled and texture is provided
+    if paper_texture_path is not None and apply_displacement:
+        blended_image = apply_displacement_from_texture(
+            blended_image,
+            paper_texture_path,
+            displacement_strength=displacement_strength,
+            apply_lighting=displacement_lighting,
+        )
 
     # Convert back to RGBA
     image = blended_image.convert("RGBA")
