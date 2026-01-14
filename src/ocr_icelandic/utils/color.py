@@ -44,7 +44,14 @@ def is_grayscale(color: tuple[int, int, int], threshold: int = 30) -> bool:
     r, g, b = color
     avg = (r + g + b) / 3
     is_gray = all(abs(c - avg) < threshold for c in [r, g, b])
-    logger.debug("Checked if RGB(%d, %d, %d) is grayscale (threshold=%d): %s", r, g, b, threshold, is_gray)
+    logger.debug(
+        "Checked if RGB(%d, %d, %d) is grayscale (threshold=%d): %s",
+        r,
+        g,
+        b,
+        threshold,
+        is_gray,
+    )
     return is_gray
 
 
@@ -81,7 +88,6 @@ def get_blend_mode(
 
     # Check if colors are grayscale (with relaxed threshold for nearly-gray colors)
     font_is_gray = is_grayscale(font_rgb, threshold=40)
-    bg_is_gray = is_grayscale(bg_rgb, threshold=40)
 
     # Calculate luminance difference for determining contrast
     lum_diff = abs(font_lum - bg_lum)
@@ -95,7 +101,11 @@ def get_blend_mode(
         and font_is_gray
     ):
         blend_mode = "multiply"
-        logger.debug("Selected 'multiply' blend mode for dark text on light background (font_lum=%.3f, bg_lum=%.3f)", font_lum, bg_lum)
+        logger.debug(
+            "Selected 'multiply' blend mode for dark text on light background (font_lum=%.3f, bg_lum=%.3f)",
+            font_lum,
+            bg_lum,
+        )
         return blend_mode
 
     # Light text on dark background -> screen
@@ -107,13 +117,22 @@ def get_blend_mode(
         and font_is_gray
     ):
         blend_mode = "screen"
-        logger.debug("Selected 'screen' blend mode for light text on dark background (font_lum=%.3f, bg_lum=%.3f)", font_lum, bg_lum)
+        logger.debug(
+            "Selected 'screen' blend mode for light text on dark background (font_lum=%.3f, bg_lum=%.3f)",
+            font_lum,
+            bg_lum,
+        )
         return blend_mode
 
     # Colored text or insufficient contrast -> normal alpha compositing
     else:
         blend_mode = "normal"
-        logger.debug("Using 'normal' blend mode: insufficient contrast or colored text (font_lum=%.3f, bg_lum=%.3f, diff=%.3f)", font_lum, bg_lum, lum_diff)
+        logger.debug(
+            "Using 'normal' blend mode: insufficient contrast or colored text (font_lum=%.3f, bg_lum=%.3f, diff=%.3f)",
+            font_lum,
+            bg_lum,
+            lum_diff,
+        )
         return blend_mode
 
 
@@ -141,7 +160,13 @@ def blend_text_layer(
     Returns:
         Blended image with text showing paper texture through it
     """
-    logger.debug("Blending text layer using '%s' mode with color RGB(%d, %d, %d)", blend_mode, font_color[0], font_color[1], font_color[2])
+    logger.debug(
+        "Blending text layer using '%s' mode with color RGB(%d, %d, %d)",
+        blend_mode,
+        font_color[0],
+        font_color[1],
+        font_color[2],
+    )
     # Convert to numpy for blending calculations
     bg_array = np.array(background, dtype=np.float32)
     mask_array = np.array(text_mask, dtype=np.float32) / 255.0

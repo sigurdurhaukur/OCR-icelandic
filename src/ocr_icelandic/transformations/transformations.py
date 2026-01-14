@@ -9,10 +9,6 @@ for better clarity:
 - pipeline.py: Configuration and apply_random_transformation
 """
 
-from ocr_icelandic.logging_config import get_logger
-
-logger = get_logger(__name__)
-
 # Re-export content effects
 from ocr_icelandic.transformations.effects import (
     blur,
@@ -38,6 +34,10 @@ from ocr_icelandic.transformations.pipeline import (
     TRANSFORMATION_CONFIG,
     apply_random_transformation,
 )
+
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 __all__ = [
     # Effects

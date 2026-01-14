@@ -68,9 +68,15 @@ def _tile_texture_seamlessly(
     if tex_width >= target_width and tex_height >= target_height:
         max_offset_x = max(0, tex_width - target_width)
         max_offset_y = max(0, tex_height - target_height)
-        offset_x = random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
-        offset_y = random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
-        return texture.crop((offset_x, offset_y, offset_x + target_width, offset_y + target_height))
+        offset_x = (
+            random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
+        )
+        offset_y = (
+            random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+        )
+        return texture.crop(
+            (offset_x, offset_y, offset_x + target_width, offset_y + target_height)
+        )
 
     # Calculate tiles needed (add extra for random offset)
     tiles_x = (target_width // tex_width) + 2
@@ -93,10 +99,16 @@ def _tile_texture_seamlessly(
     # Crop to target size with random offset
     max_offset_x = max(0, tiled.width - target_width)
     max_offset_y = max(0, tiled.height - target_height)
-    offset_x = random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
-    offset_y = random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+    offset_x = (
+        random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
+    )
+    offset_y = (
+        random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+    )
 
-    return tiled.crop((offset_x, offset_y, offset_x + target_width, offset_y + target_height))
+    return tiled.crop(
+        (offset_x, offset_y, offset_x + target_width, offset_y + target_height)
+    )
 
 
 def _apply_edge_blending(
@@ -125,18 +137,22 @@ def _apply_edge_blending(
         x = i * tile_width
         if x < tiled.width - blend_width:
             # Apply slight blur near seam
-            region = tiled.crop((x - blend_width//2, 0, x + blend_width//2, tiled.height))
+            region = tiled.crop(
+                (x - blend_width // 2, 0, x + blend_width // 2, tiled.height)
+            )
             blurred = region.filter(ImageFilter.GaussianBlur(radius=1.0))
-            tiled.paste(blurred, (x - blend_width//2, 0))
+            tiled.paste(blurred, (x - blend_width // 2, 0))
 
     # Create blend mask for horizontal seams
     for j in range(1, tiled.height // tile_height):
         y = j * tile_height
         if y < tiled.height - blend_width:
             # Apply slight blur near seam
-            region = tiled.crop((0, y - blend_width//2, tiled.width, y + blend_width//2))
+            region = tiled.crop(
+                (0, y - blend_width // 2, tiled.width, y + blend_width // 2)
+            )
             blurred = region.filter(ImageFilter.GaussianBlur(radius=1.0))
-            tiled.paste(blurred, (0, y - blend_width//2))
+            tiled.paste(blurred, (0, y - blend_width // 2))
 
     return tiled
 
@@ -162,7 +178,11 @@ def apply_paper_texture(
     Returns:
         Image with paper texture applied
     """
-    logger.debug("Applying paper texture from '%s' with blend_alpha=%.2f", texture_path, blend_alpha)
+    logger.debug(
+        "Applying paper texture from '%s' with blend_alpha=%.2f",
+        texture_path,
+        blend_alpha,
+    )
     try:
         # Load the texture in RGB mode to preserve all detail
         texture = Image.open(texture_path).convert("RGB")
@@ -175,7 +195,7 @@ def apply_paper_texture(
             (img_width, img_height),
             random_offset=True,
             blend_edges=True,
-            edge_blend_width=10
+            edge_blend_width=10,
         )
 
         # Convert to numpy arrays for processing
@@ -335,7 +355,13 @@ def apply_background_image(
         background = Image.open(background_path).convert("RGBA")
         bg_width, bg_height = background.size
         fg_width, fg_height = foreground.size
-        logger.debug("Loaded background (%dx%d) and foreground (%dx%d)", bg_width, bg_height, fg_width, fg_height)
+        logger.debug(
+            "Loaded background (%dx%d) and foreground (%dx%d)",
+            bg_width,
+            bg_height,
+            fg_width,
+            fg_height,
+        )
 
         # Convert foreground to RGBA if needed
         if foreground.mode != "RGBA":
@@ -346,7 +372,13 @@ def apply_background_image(
             scale_factor = max(fg_width / bg_width, fg_height / bg_height) * 1.2
             new_bg_width = int(bg_width * scale_factor)
             new_bg_height = int(bg_height * scale_factor)
-            logger.debug("Scaling background from (%dx%d) to (%dx%d)", bg_width, bg_height, new_bg_width, new_bg_height)
+            logger.debug(
+                "Scaling background from (%dx%d) to (%dx%d)",
+                bg_width,
+                bg_height,
+                new_bg_width,
+                new_bg_height,
+            )
             background = background.resize(
                 (new_bg_width, new_bg_height), Image.Resampling.BICUBIC
             )
@@ -433,7 +465,13 @@ def texture_to_height_map(
     Returns:
         Height map as float32 array (0.0 to 1.0) with shape (height, width)
     """
-    logger.debug("Converting texture to height map: size=%dx%d, blur=%.1f, contrast=%.1f", size[0], size[1], blur_radius, contrast)
+    logger.debug(
+        "Converting texture to height map: size=%dx%d, blur=%.1f, contrast=%.1f",
+        size[0],
+        size[1],
+        blur_radius,
+        contrast,
+    )
     # Load texture and convert to grayscale
     texture = Image.open(texture_path).convert("L")
     img_width, img_height = size
@@ -445,7 +483,7 @@ def texture_to_height_map(
         size,
         random_offset=True,
         blend_edges=True,
-        edge_blend_width=8  # Slightly smaller for height maps
+        edge_blend_width=8,  # Slightly smaller for height maps
     )
 
     # Apply Gaussian blur for smooth gradients
@@ -496,7 +534,11 @@ def apply_displacement_from_texture(
     Returns:
         Warped (and optionally lit) image
     """
-    logger.debug("Applying displacement from texture: '%s' with strength=%.2f", texture_path, displacement_strength)
+    logger.debug(
+        "Applying displacement from texture: '%s' with strength=%.2f",
+        texture_path,
+        displacement_strength,
+    )
     # Get image dimensions
     img_width, img_height = image.size
     logger.debug("Image dimensions: %dx%d", img_width, img_height)

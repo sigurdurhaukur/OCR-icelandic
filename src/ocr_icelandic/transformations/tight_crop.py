@@ -84,7 +84,9 @@ def tight_crop(
     # Only apply tight crop if text coverage is less than 50%
     # This means there's significant empty space
     if coverage >= 0.5:
-        logger.debug("Text coverage too high (%.1f%%), skipping tight crop", coverage * 100)
+        logger.debug(
+            "Text coverage too high (%.1f%%), skipping tight crop", coverage * 100
+        )
         return (
             image,
             {

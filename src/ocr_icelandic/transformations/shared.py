@@ -18,7 +18,13 @@ def _copy_paragraph_bboxes(
 def _clamp_value(value: float, minimum: float, maximum: float) -> float:
     clamped = max(minimum, min(value, maximum))
     if clamped != value:
-        logger.debug("Clamped value %.2f to range [%.2f, %.2f] -> %.2f", value, minimum, maximum, clamped)
+        logger.debug(
+            "Clamped value %.2f to range [%.2f, %.2f] -> %.2f",
+            value,
+            minimum,
+            maximum,
+            clamped,
+        )
     return clamped
 
 

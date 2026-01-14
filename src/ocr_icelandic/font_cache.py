@@ -14,6 +14,7 @@ from ocr_icelandic.logging_config import get_logger
 logger = get_logger(__name__)
 logger.setLevel("INFO")
 
+
 class FontCompatibilityCache:
     """SQLite-based cache for font compatibility results.
 
@@ -168,7 +169,9 @@ class FontCompatibilityCache:
             >>> if result is not None:
             ...     print(f"Cache hit: {result}")
         """
-        logger.debug(f"Checking cache for: {Path(font_path).name}, language: {language_code}")
+        logger.debug(
+            f"Checking cache for: {Path(font_path).name}, language: {language_code}"
+        )
         font_path_obj = Path(font_path)
         if not font_path_obj.exists():
             logger.debug(f"Font file not found: {font_path}")
@@ -209,12 +212,18 @@ class FontCompatibilityCache:
                         and result["file_mtime"] == current_mtime
                     ):
                         is_compatible = bool(result["is_compatible"])
-                        logger.debug(f"Cache hit: {Path(font_path).name} for {language_code} = {is_compatible}")
+                        logger.debug(
+                            f"Cache hit: {Path(font_path).name} for {language_code} = {is_compatible}"
+                        )
                         return is_compatible
                     else:
-                        logger.debug(f"Cache stale for: {Path(font_path).name} (file changed)")
+                        logger.debug(
+                            f"Cache stale for: {Path(font_path).name} (file changed)"
+                        )
 
-            logger.debug(f"Cache miss for: {Path(font_path).name}, language: {language_code}")
+            logger.debug(
+                f"Cache miss for: {Path(font_path).name}, language: {language_code}"
+            )
             return None
 
         except (OSError, sqlite3.Error) as e:
@@ -338,7 +347,9 @@ class FontCompatibilityCache:
             >>> len(fonts)
             42
         """
-        logger.debug(f"Retrieving cached compatible fonts for language: {language_code}")
+        logger.debug(
+            f"Retrieving cached compatible fonts for language: {language_code}"
+        )
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Enable foreign key constraints

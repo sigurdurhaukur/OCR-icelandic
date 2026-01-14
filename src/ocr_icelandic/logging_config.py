@@ -19,7 +19,6 @@ Environment Variables:
 
 import logging
 import os
-from typing import Optional
 
 # Global lock to ensure thread-safe lazy initialization
 _INIT_LOCK = None
@@ -87,11 +86,11 @@ def _initialize_logging() -> None:
 
     # Create rich handler with useful settings
     handler = RichHandler(
-        show_time=True,           # Show timestamp
-        show_level=True,          # Show log level (DEBUG, INFO, etc.)
-        show_path=True,           # Show file path and line number
-        rich_tracebacks=True,     # Format tracebacks with rich styling
-        markup=True,              # Allow [bold], [red], etc. in messages
+        show_time=True,  # Show timestamp
+        show_level=True,  # Show log level (DEBUG, INFO, etc.)
+        show_path=True,  # Show file path and line number
+        rich_tracebacks=True,  # Format tracebacks with rich styling
+        markup=True,  # Allow [bold], [red], etc. in messages
     )
     handler.setLevel(log_level)
 

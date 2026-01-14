@@ -254,7 +254,11 @@ def apply_random_transformation(
     Returns:
         Tuple of (transformed RGBA image, transformation metadata, transformed bboxes)
     """
-    logger.debug("Starting transformation pipeline: use_background=%s, background_has_shadow=%s", use_background, background_has_shadow)
+    logger.debug(
+        "Starting transformation pipeline: use_background=%s, background_has_shadow=%s",
+        use_background,
+        background_has_shadow,
+    )
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Select pipeline based on background configuration
@@ -287,12 +291,17 @@ def apply_random_transformation(
     logger.debug("Applying %d transformations", len(transformations_to_apply))
     transformation_meta: list[dict[str, Any]] = []
     for idx, transform in enumerate(transformations_to_apply):
-        logger.debug("Applying transformation %d/%d", idx + 1, len(transformations_to_apply))
+        logger.debug(
+            "Applying transformation %d/%d", idx + 1, len(transformations_to_apply)
+        )
         image, meta, paragraph_bboxes_copy = transform(
             image, bg_color, paragraph_bboxes_copy
         )
         transformation_meta.append(meta)
 
-    logger.debug("Transformation pipeline complete: %d transformations applied", len(transformation_meta))
+    logger.debug(
+        "Transformation pipeline complete: %d transformations applied",
+        len(transformation_meta),
+    )
     # Return RGBA image directly (no RGB composite here)
     return image, transformation_meta, paragraph_bboxes_copy

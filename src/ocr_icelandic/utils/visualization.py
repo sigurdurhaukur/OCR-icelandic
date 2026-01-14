@@ -60,7 +60,12 @@ def visualise_bboxes(
     Returns:
         PIL Image object with bounding boxes drawn
     """
-    logger.debug("Visualizing %d bounding boxes on image (size=%dx%d)", len(paragraph_bboxes), image.width, image.height)
+    logger.debug(
+        "Visualizing %d bounding boxes on image (size=%dx%d)",
+        len(paragraph_bboxes),
+        image.width,
+        image.height,
+    )
     # Create a copy to avoid modifying the original
     visualized_image = image.copy()
     draw = ImageDraw.Draw(visualized_image)
@@ -98,7 +103,9 @@ def visualise_bboxes(
         # Select color from palette (cycle sequentially)
         color = color_palette[idx % len(color_palette)]
 
-        logger.debug("Drawing bbox %d: coordinates (%d, %d, %d, %d)", idx, x1, y1, x2, y2)
+        logger.debug(
+            "Drawing bbox %d: coordinates (%d, %d, %d, %d)", idx, x1, y1, x2, y2
+        )
         # Draw rectangle
         draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
 

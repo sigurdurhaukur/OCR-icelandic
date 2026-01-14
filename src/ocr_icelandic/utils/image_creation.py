@@ -68,8 +68,16 @@ def create_image_with_text(
     Returns:
         tuple: (PIL Image object, string of text that actually fits in the image, paragraph bounding boxes)
     """
-    logger.debug("Creating image with text: size=%dx%d, dpi=%d, columns=%d", image_size[0], image_size[1], dpi, num_columns)
-    logger.debug("Font: %s, size=%d, color=%s, bg=%s", font_path, font_size, font_color, bg_color)
+    logger.debug(
+        "Creating image with text: size=%dx%d, dpi=%d, columns=%d",
+        image_size[0],
+        image_size[1],
+        dpi,
+        num_columns,
+    )
+    logger.debug(
+        "Font: %s, size=%d, color=%s, bg=%s", font_path, font_size, font_color, bg_color
+    )
 
     scale_factor = dpi / 72.0
     scaled_image_size = (
@@ -77,7 +85,12 @@ def create_image_with_text(
         int(image_size[1] * scale_factor),
     )
     scaled_font_size = int(font_size * scale_factor)
-    logger.debug("Scaled dimensions: %dx%d, scaled font size: %d", scaled_image_size[0], scaled_image_size[1], scaled_font_size)
+    logger.debug(
+        "Scaled dimensions: %dx%d, scaled font size: %d",
+        scaled_image_size[0],
+        scaled_image_size[1],
+        scaled_font_size,
+    )
 
     # Convert bg_color to RGBA if it's RGB
     if isinstance(bg_color, tuple) and len(bg_color) == 3:
@@ -127,7 +140,6 @@ def create_image_with_text(
     wrapped_paragraphs = None
     has_overflow = True
     current_column_width = 0
-    initial_num_columns = num_columns
     retry_count = 0
     while has_overflow and num_columns >= 1:
         total_gap = column_gap * (num_columns - 1)
@@ -154,14 +166,23 @@ def create_image_with_text(
         current_column_width = resolved_column_width
 
         # Try wrapping with current column configuration
-        logger.debug("Wrap attempt %d: columns=%d, width=%d", retry_count, num_columns, current_column_width)
+        logger.debug(
+            "Wrap attempt %d: columns=%d, width=%d",
+            retry_count,
+            num_columns,
+            current_column_width,
+        )
         wrap_result = wrap_text(draw, text, font, current_column_width, tab_width)
         wrapped_paragraphs = wrap_result.paragraphs
         has_overflow = wrap_result.has_overflow
 
         # If overflow detected and we can reduce columns, try again
         if has_overflow and num_columns > 1:
-            logger.debug("Text overflow detected, reducing columns from %d to %d", num_columns, num_columns - 1)
+            logger.debug(
+                "Text overflow detected, reducing columns from %d to %d",
+                num_columns,
+                num_columns - 1,
+            )
             num_columns -= 1
             retry_count += 1
         else:
@@ -169,7 +190,9 @@ def create_image_with_text(
             break
 
     # Final column configuration after retry loop
-    logger.debug("Text wrapping complete: %d retries, final columns=%d", retry_count, num_columns)
+    logger.debug(
+        "Text wrapping complete: %d retries, final columns=%d", retry_count, num_columns
+    )
     column_width = current_column_width
     total_gap = column_gap * (num_columns - 1)
     block_width = column_width * num_columns + total_gap
@@ -189,7 +212,11 @@ def create_image_with_text(
             + 1,
         )
     )
-    logger.debug("Layout: line_height=%d, max_lines_per_column=%d", line_height, max_lines_per_column)
+    logger.debug(
+        "Layout: line_height=%d, max_lines_per_column=%d",
+        line_height,
+        max_lines_per_column,
+    )
 
     placements, column_counts = arrange_lines_in_columns(
         wrapped_paragraphs, max_lines_per_column, num_columns
@@ -284,7 +311,9 @@ def create_image_with_text(
 
     # Apply displacement mapping if enabled and texture is provided
     if paper_texture_path is not None and apply_displacement:
-        logger.debug("Applying displacement mapping with strength=%.2f", displacement_strength)
+        logger.debug(
+            "Applying displacement mapping with strength=%.2f", displacement_strength
+        )
         text_mask = apply_displacement_from_texture(
             text_mask,
             paper_texture_path,
@@ -313,5 +342,9 @@ def create_image_with_text(
         for idx, data in sorted(paragraph_bboxes_map.items())
     ]
 
-    logger.debug("Image creation complete: %d bounding boxes, %d text lines", len(paragraph_bboxes), len(actual_text_lines))
+    logger.debug(
+        "Image creation complete: %d bounding boxes, %d text lines",
+        len(paragraph_bboxes),
+        len(actual_text_lines),
+    )
     return image, actual_text, paragraph_bboxes

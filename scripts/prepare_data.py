@@ -377,6 +377,7 @@ def generate_single_text(
                 column_gap=cfg.column_gap,
                 column_width=column_width,
                 paper_texture_path=paper_texture_path,
+                apply_displacement=True,
             )
 
             # Decide whether to use a background image

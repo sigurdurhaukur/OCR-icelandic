@@ -49,7 +49,13 @@ def light_reflection(
     # Get ellipse size
     ellipse_width = random.randint(width // 8, width // 4)
     ellipse_height = random.randint(height // 8, height // 6)
-    logger.debug("Light reflection: center=(%d,%d), ellipse=(%d,%d)", center_x, center_y, ellipse_width, ellipse_height)
+    logger.debug(
+        "Light reflection: center=(%d,%d), ellipse=(%d,%d)",
+        center_x,
+        center_y,
+        ellipse_width,
+        ellipse_height,
+    )
 
     # Create a mask for the reflection
     mask = Image.new("L", (width, height), 0)
