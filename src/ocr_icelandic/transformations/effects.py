@@ -7,6 +7,7 @@ damage, and printing artifacts:
 - textured_stains: Coffee/tea stain textures from asset files
 - dusty_paper: Grainy paper texture overlay
 - reverse_bleed_through: Text bleeding through from reverse side
+- paper_edge_unevenness: Light wavy/irregular paper edges
 """
 
 from pathlib import Path
@@ -17,7 +18,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
+
+logger = get_logger(__name__)
 
 
 def blur(
@@ -35,9 +39,11 @@ def blur(
     Returns:
         Tuple of (blurred image, metadata dict, unchanged bboxes)
     """
+    logger.debug("Applying blur transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     radius = random.uniform(0.1, 0.5)
+    logger.debug("Blur radius: %.2f", radius)
     return (
         image.filter(ImageFilter.GaussianBlur(radius)),
         {
@@ -63,10 +69,12 @@ def ink_splashes(
     Returns:
         Tuple of (image with splashes, metadata dict, unchanged bboxes)
     """
+    logger.debug("Applying ink splashes transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     splashes = random.randint(3, 6)
+    logger.debug("Creating %d ink splashes", splashes)
     for _ in range(splashes):
         radius = random.randint(10, 30)
         cx = random.randint(0, image.width)
@@ -116,9 +124,11 @@ def textured_stains(
     Returns:
         Tuple of (stained image, metadata dict, unchanged bboxes)
     """
+    logger.debug("Applying textured stains transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     texture = random.choice(stain_textures)
+    logger.debug("Using stain texture: %s", texture)
     stain = Image.open(texture).convert("RGBA")
     # Adjust scale factor to ensure stain fits within image
     max_scale = min(image.width / stain.width, image.height / stain.height) * 0.8
@@ -329,6 +339,111 @@ def reverse_bleed_through(
             "intensity": round(float(intensity), 3),
             "shift_x": shift_x,
             "shift_y": shift_y,
+        },
+        paragraph_bboxes_copy,
+    )
+
+
+def paper_edge_unevenness(
+    image: Image.Image,
+    bg_color: str | tuple[int, int, int],
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
+    """Apply light paper edge unevenness to simulate real paper edges.
+
+    Creates slightly wavy/irregular edges to make documents look like
+    real paper that has been cut or has natural edge imperfections.
+
+    Args:
+        image: Input image
+        bg_color: Background color to fill outside the uneven edges
+        paragraph_bboxes: Optional bounding boxes (unchanged)
+
+    Returns:
+        Tuple of (image with uneven edges, metadata dict, unchanged bboxes)
+    """
+    paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
+
+    # Parameters for light edge unevenness
+    max_deviation = random.randint(1, 8)  # Small deviations for subtle effect
+    num_points = random.randint(10, 20)  # Control points per edge
+
+    width, height = image.size
+
+    # Generate wavy edge points for each edge
+    def generate_edge_points(
+        start: tuple[int, int],
+        end: tuple[int, int],
+        num_pts: int,
+        max_dev: int,
+        inward_direction: tuple[int, int],
+    ) -> list[tuple[int, int]]:
+        """Generate points along an edge with random deviations.
+
+        Note: First and last points have no deviation so corners meet cleanly.
+        """
+        points = []
+        for i in range(num_pts + 1):
+            t = i / num_pts
+            # Base position along edge
+            x = int(start[0] + t * (end[0] - start[0]))
+            y = int(start[1] + t * (end[1] - start[1]))
+            # Add random deviation inward, but not at endpoints (corners)
+            if i == 0 or i == num_pts:
+                deviation = 0
+            else:
+                deviation = random.randint(0, max_dev)
+            x += inward_direction[0] * deviation
+            y += inward_direction[1] * deviation
+            points.append((x, y))
+        return points
+
+    # Generate points for all four edges (deviations go inward)
+    top_points = generate_edge_points(
+        (0, 0), (width, 0), num_points, max_deviation, (0, 1)
+    )
+    right_points = generate_edge_points(
+        (width, 0), (width, height), num_points, max_deviation, (-1, 0)
+    )
+    bottom_points = generate_edge_points(
+        (width, height), (0, height), num_points, max_deviation, (0, -1)
+    )
+    left_points = generate_edge_points(
+        (0, height), (0, 0), num_points, max_deviation, (1, 0)
+    )
+
+    # Combine all points into a polygon (going clockwise)
+    polygon_points = top_points + right_points + bottom_points + left_points
+
+    # Draw the polygon on mask (black outside, white inside)
+    mask = Image.new("L", image.size, 0)
+    draw = ImageDraw.Draw(mask)
+    draw.polygon(polygon_points, fill=255)
+
+    # Apply slight blur to soften the jagged edges
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=0.5))
+
+    # Ensure image is RGBA
+    if image.mode != "RGBA":
+        image = image.convert("RGBA")
+
+    # Multiply existing alpha with wavy edge mask
+    # This cuts away the edges while preserving existing transparency
+    result = image.copy()
+    r, g, b, a = result.split()
+
+    mask_array = np.array(mask, dtype=np.float32) / 255.0
+    alpha_array = np.array(a, dtype=np.float32) / 255.0
+    new_alpha = (mask_array * alpha_array * 255).astype(np.uint8)
+
+    result.putalpha(Image.fromarray(new_alpha))
+
+    return (
+        result,
+        {
+            "transformation": "paper_edge_unevenness",
+            "max_deviation": max_deviation,
+            "num_points": num_points,
         },
         paragraph_bboxes_copy,
     )
