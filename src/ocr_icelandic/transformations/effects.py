@@ -11,6 +11,7 @@ damage, and printing artifacts:
 
 from pathlib import Path
 import random
+from typing import Any
 
 import cv2
 import numpy as np
@@ -22,8 +23,8 @@ from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 def blur(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Apply Gaussian blur to simulate camera focus issues.
 
     Args:
@@ -50,8 +51,8 @@ def blur(
 def ink_splashes(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Add random ink splatter effects to simulate printing artifacts.
 
     Args:
@@ -103,8 +104,8 @@ stain_textures = list(Path("assets/stains").glob("*.png"))
 def textured_stains(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict[str, any]] | None = None,
-) -> tuple[Image.Image, dict[str, any], list[dict[str, any]]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Apply coffee/tea stain textures using multiply blending.
 
     Args:
@@ -203,8 +204,8 @@ def textured_stains(
 def dusty_paper(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Create grainy overlay to simulate dusty paper.
 
     Varies in grain size and intensity.
@@ -238,8 +239,8 @@ def dusty_paper(
 def reverse_bleed_through(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Simulate bleed-through effect from text on reverse side of page.
 
     Args:
@@ -277,15 +278,15 @@ def reverse_bleed_through(
     min_shift_y = max(3, int(img_array.shape[0] * 0.1))
 
     # Generate random shift
-    shift_x = np.random.choice([-1, 1]) * np.random.randint(
-        min_shift_x, min_shift_x + 10
+    shift_x = int(
+        np.random.choice([-1, 1]) * np.random.randint(min_shift_x, min_shift_x + 10)
     )
-    shift_y = np.random.choice([-1, 1]) * np.random.randint(
-        min_shift_y, min_shift_y + 10
+    shift_y = int(
+        np.random.choice([-1, 1]) * np.random.randint(min_shift_y, min_shift_y + 10)
     )
 
     # Create transformation matrix to shift the flipped image (bleed-through)
-    M = np.float32([[1, 0, shift_x], [0, 1, shift_y]])
+    M = np.array([[1, 0, shift_x], [0, 1, shift_y]], dtype=np.float32)
     shifted = cv2.warpAffine(
         flipped,
         M,
@@ -325,7 +326,7 @@ def reverse_bleed_through(
         result_image,
         {
             "transformation": "reverse_bleed_through",
-            "intensity": round(intensity, 3),
+            "intensity": round(float(intensity), 3),
             "shift_x": shift_x,
             "shift_y": shift_y,
         },

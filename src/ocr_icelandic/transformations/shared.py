@@ -1,4 +1,9 @@
-def _copy_paragraph_bboxes(paragraph_bboxes: list[dict] | None) -> list[dict]:
+from typing import Any
+
+
+def _copy_paragraph_bboxes(
+    paragraph_bboxes: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
     if not paragraph_bboxes:
         return []
     return [{**bbox, "bbox": list(bbox.get("bbox", []))} for bbox in paragraph_bboxes]

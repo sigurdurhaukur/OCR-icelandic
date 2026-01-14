@@ -13,8 +13,19 @@ def color_to_rgb(color: str | tuple[int, int, int]) -> tuple[int, int, int]:
 
 
 def calculate_luminance(color: tuple[int, int, int]) -> float:
-    """Calculate perceived luminance of a color (0-255 scale)."""
-    return 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]
+    """
+    Calculate relative luminance per WCAG 2.1 specification.
+
+    Returns luminance in 0.0-1.0 range (gamma-corrected).
+    """
+    r, g, b = color
+    # Normalize to 0-1 range
+    r, g, b = r / 255.0, g / 255.0, b / 255.0
+    # Apply gamma correction
+    r = r / 12.92 if r <= 0.03928 else ((r + 0.055) / 1.055) ** 2.4
+    g = g / 12.92 if g <= 0.03928 else ((g + 0.055) / 1.055) ** 2.4
+    b = b / 12.92 if b <= 0.03928 else ((b + 0.055) / 1.055) ** 2.4
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
 def is_grayscale(color: tuple[int, int, int], threshold: int = 30) -> bool:
@@ -31,36 +42,58 @@ def get_blend_mode(
     """
     Determine the appropriate blending mode based on font and background colors.
 
+    Automatically selects the blend mode to ensure text visibility and realistic
+    paper texture appearance:
+    - multiply: Dark text on light background
+    - screen: Light text on dark background
+    - normal: Colored text or mid-tone combinations
+
     Args:
         font_color: Color of the text
         bg_color: Background color
 
     Returns:
         Blending mode: "multiply", "screen", or "normal"
-        - multiply: Dark text on light background (makes paper texture visible through text)
-        - screen: Light text on dark background (makes paper texture visible through text)
-        - normal: Colored text on colored background (standard alpha compositing)
     """
     font_rgb = color_to_rgb(font_color)
     bg_rgb = color_to_rgb(bg_color)
 
+    # Calculate WCAG 2.1 relative luminance (0.0-1.0 range)
     font_lum = calculate_luminance(font_rgb)
     bg_lum = calculate_luminance(bg_rgb)
 
-    # Thresholds for determining "dark" vs "light"
-    dark_threshold = 100
-    light_threshold = 155
+    # Luminance thresholds (WCAG 2.1 scale: 0.0-1.0)
+    dark_threshold = 0.18  # Roughly equivalent to RGB(137, 137, 137)
+    light_threshold = 0.50  # Roughly equivalent to RGB(188, 188, 188)
 
-    # Check if colors are grayscale
-    font_is_gray = is_grayscale(font_rgb)
+    # Check if colors are grayscale (with relaxed threshold for nearly-gray colors)
+    font_is_gray = is_grayscale(font_rgb, threshold=40)
+    bg_is_gray = is_grayscale(bg_rgb, threshold=40)
+
+    # Calculate luminance difference for determining contrast
+    lum_diff = abs(font_lum - bg_lum)
 
     # Dark text on light background -> multiply
-    if font_lum < dark_threshold and bg_lum > light_threshold and font_is_gray:
+    # Conditions: background is light, font is darker than background, mostly grayscale
+    if (
+        bg_lum >= light_threshold
+        and font_lum < bg_lum
+        and lum_diff > 0.2
+        and font_is_gray
+    ):
         return "multiply"
+
     # Light text on dark background -> screen
-    elif font_lum > light_threshold and bg_lum < dark_threshold and font_is_gray:
+    # Conditions: background is dark, font is lighter than background, mostly grayscale
+    elif (
+        bg_lum <= dark_threshold
+        and font_lum > bg_lum
+        and lum_diff > 0.2
+        and font_is_gray
+    ):
         return "screen"
-    # Colored text on colored background -> normal
+
+    # Colored text or insufficient contrast -> normal alpha compositing
     else:
         return "normal"
 

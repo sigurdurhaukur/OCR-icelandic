@@ -8,6 +8,8 @@ This module provides:
 """
 
 import random
+from collections.abc import Callable
+from typing import Any
 
 from PIL import Image
 
@@ -29,9 +31,15 @@ from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 from ocr_icelandic.transformations.skew import skew
 from ocr_icelandic.transformations.tight_crop import tight_crop
 
+# Type alias for transformation functions
+TransformFunc = Callable[
+    [Image.Image, str | tuple[int, int, int], list[dict[str, Any]] | None],
+    tuple[Image.Image, dict[str, Any], list[dict[str, Any]]],
+]
+
 
 # Transformation categories with their functions and default probabilities
-TRANSFORMATION_CONFIG = {
+TRANSFORMATION_CONFIG: dict[str, dict[str, dict[str, Any]]] = {
     "content": {
         "blur": {"function": blur, "probability": 0.3},
         "ink_splashes": {"function": ink_splashes, "probability": 0.2},
@@ -57,7 +65,7 @@ TRANSFORMATION_CONFIG = {
 
 
 # Pipeline configurations for different scenarios
-PIPELINE_NO_BACKGROUND_PROBABILITIES = {
+PIPELINE_NO_BACKGROUND_PROBABILITIES: dict[str, float] = {
     # Content transformations - default probabilities
     "blur": 0.3,
     "ink_splashes": 0.2,
@@ -75,7 +83,7 @@ PIPELINE_NO_BACKGROUND_PROBABILITIES = {
     "shadow_gradient": 0.35,  # Reduced from 0.7
 }
 
-PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES = {
+PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES: dict[str, float] = {
     # Content transformations - default probabilities
     "blur": 0.3,
     "ink_splashes": 0.2,
@@ -93,7 +101,7 @@ PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES = {
     "shadow_gradient": 0.7,
 }
 
-PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES = {
+PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES: dict[str, float] = {
     # Content transformations - default probabilities
     "blur": 0.3,
     "ink_splashes": 0.2,
@@ -113,9 +121,9 @@ PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES = {
 
 
 def _select_transformations_by_probability(
-    category_config: dict,
-    probability_overrides: dict | None = None,
-) -> list:
+    category_config: dict[str, dict[str, Any]],
+    probability_overrides: dict[str, float] | None = None,
+) -> list[Callable[..., Any]]:
     """Select transformations based on individual probabilities.
 
     Args:
@@ -125,7 +133,7 @@ def _select_transformations_by_probability(
     Returns:
         List of selected transformation functions
     """
-    selected = []
+    selected: list[Callable[..., Any]] = []
     for name, config in category_config.items():
         # Get probability (use override if provided)
         prob = (
@@ -141,7 +149,7 @@ def _select_transformations_by_probability(
     return selected
 
 
-def _get_pipeline_no_background() -> list:
+def _get_pipeline_no_background() -> list[Callable[..., Any]]:
     """Pipeline 1: No photo background.
 
     Uses all transformations with reduced postprocessing probabilities.
@@ -149,7 +157,7 @@ def _get_pipeline_no_background() -> list:
     Returns:
         List of transformation functions to apply
     """
-    transformations = []
+    transformations: list[Callable[..., Any]] = []
 
     # Select from all categories using the no-background pipeline probabilities
     for category_name, category_config in TRANSFORMATION_CONFIG.items():
@@ -162,7 +170,7 @@ def _get_pipeline_no_background() -> list:
     return transformations
 
 
-def _get_pipeline_background_with_shadow() -> list:
+def _get_pipeline_background_with_shadow() -> list[Callable[..., Any]]:
     """Pipeline 2: Photo background with shadow (e.g., desk surface).
 
     Uses all transformations with default probabilities.
@@ -171,7 +179,7 @@ def _get_pipeline_background_with_shadow() -> list:
     Returns:
         List of transformation functions to apply
     """
-    transformations = []
+    transformations: list[Callable[..., Any]] = []
 
     # Select from all categories using default probabilities
     for category_name, category_config in TRANSFORMATION_CONFIG.items():
@@ -184,7 +192,7 @@ def _get_pipeline_background_with_shadow() -> list:
     return transformations
 
 
-def _get_pipeline_background_no_shadow() -> list:
+def _get_pipeline_background_no_shadow() -> list[Callable[..., Any]]:
     """Pipeline 3: Photo background without shadow (e.g., distant landscape).
 
     Uses all transformations except light_reflection and shadow_overlay.
@@ -193,7 +201,7 @@ def _get_pipeline_background_no_shadow() -> list:
     Returns:
         List of transformation functions to apply
     """
-    transformations = []
+    transformations: list[Callable[..., Any]] = []
 
     # Select from all categories, with light_reflection and shadow_overlay disabled
     for category_name, category_config in TRANSFORMATION_CONFIG.items():
@@ -209,11 +217,11 @@ def _get_pipeline_background_no_shadow() -> list:
 def apply_random_transformation(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
     use_background: bool = False,
     background_has_shadow: bool = False,
-    probability_overrides: dict | None = None,
-) -> tuple[Image.Image, list[dict], list[dict]]:
+    probability_overrides: dict[str, float] | None = None,
+) -> tuple[Image.Image, list[dict[str, Any]], list[dict[str, Any]]]:
     """Apply random transformations to an image using one of three hard-coded pipelines.
 
     Pipeline selection logic:
@@ -259,7 +267,7 @@ def apply_random_transformation(
             )
 
     # Apply selected transformations
-    transformation_meta: list[dict] = []
+    transformation_meta: list[dict[str, Any]] = []
     for transform in transformations_to_apply:
         image, meta, paragraph_bboxes_copy = transform(
             image, bg_color, paragraph_bboxes_copy

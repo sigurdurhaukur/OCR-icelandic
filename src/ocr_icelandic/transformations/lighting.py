@@ -8,6 +8,7 @@ during document photography or scanning:
 """
 
 import random
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -17,8 +18,8 @@ from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 def light_reflection(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Simulate light reflection on the image.
 
     Creates an elliptical bright spot to simulate camera flash
@@ -91,8 +92,8 @@ def light_reflection(
 def shadow_overlay(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Cast a random uneven shadow from one edge with fuzzy borders.
 
     Simulates shadows cast during document photography, such as
@@ -122,37 +123,37 @@ def shadow_overlay(
     max_depth = random.uniform(0.15, 0.5) * min(image.width, image.height)
     opacity = random.randint(20, 120)
 
-    # Create uneven shadow polygon
-    points = []
+    # Create uneven shadow polygon with integer coordinates
+    points: list[tuple[float, float]] = []
     polygons_points = 3
     if edge == 0:  # Top edge
-        points = [(0, 0), (image.width, 0)]
+        points = [(0.0, 0.0), (float(image.width), 0.0)]
         for i in range(polygons_points):
             x = (i + 1) * image.width / 6
             y = random.uniform(max_depth * 0.3, max_depth)
             points.append((x, y))
-        points.extend([(0, random.uniform(max_depth * 0.3, max_depth))])
+        points.append((0.0, random.uniform(max_depth * 0.3, max_depth)))
     elif edge == 1:  # Right edge
-        points = [(image.width, 0), (image.width, image.height)]
+        points = [(float(image.width), 0.0), (float(image.width), float(image.height))]
         for i in range(polygons_points):
             x = image.width - random.uniform(max_depth * 0.3, max_depth)
             y = (i + 1) * image.height / 6
             points.append((x, y))
-        points.extend([(image.width - random.uniform(max_depth * 0.3, max_depth), 0)])
+        points.append((image.width - random.uniform(max_depth * 0.3, max_depth), 0.0))
     elif edge == 2:  # Bottom edge
-        points = [(0, image.height), (image.width, image.height)]
+        points = [(0.0, float(image.height)), (float(image.width), float(image.height))]
         for i in range(polygons_points):
             x = (i + 1) * image.width / 6
             y = image.height - random.uniform(max_depth * 0.3, max_depth)
             points.append((x, y))
-        points.extend([(0, image.height - random.uniform(max_depth * 0.3, max_depth))])
+        points.append((0.0, image.height - random.uniform(max_depth * 0.3, max_depth)))
     else:  # Left edge
-        points = [(0, 0), (0, image.height)]
+        points = [(0.0, 0.0), (0.0, float(image.height))]
         for i in range(polygons_points):
             x = random.uniform(max_depth * 0.3, max_depth)
             y = (i + 1) * image.height / 6
             points.append((x, y))
-        points.extend([(random.uniform(max_depth * 0.3, max_depth), 0)])
+        points.append((random.uniform(max_depth * 0.3, max_depth), 0.0))
 
     # Draw shadow polygon
     shadow_draw.polygon(points, fill=(0, 0, 0, opacity))
@@ -180,8 +181,8 @@ def shadow_overlay(
 def shadow_gradient(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    paragraph_bboxes: list[dict[str, Any]] | None = None,
+) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Apply a shadow gradient overlay to simulate lighting effects.
 
     Creates a vertical gradient from transparent to semi-transparent
