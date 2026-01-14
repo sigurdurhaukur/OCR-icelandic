@@ -3,11 +3,14 @@ from typing import TypedDict
 
 from PIL import Image
 
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
     _clamp_value,
     _copy_paragraph_bboxes,
     _round_bbox,
 )
+
+logger = get_logger(__name__)
 
 
 class SkewMeta(TypedDict):
@@ -21,10 +24,12 @@ class SkewMeta(TypedDict):
 
 
 def _skew_within_bounds(image: Image.Image, dx: float) -> tuple[Image.Image, SkewMeta]:
+    logger.debug("Skewing image with dx=%.3f", dx)
     width, height = image.size
 
     # Calculate the expanded width after skew
     max_shift = abs(dx * height)
+    logger.debug("Max shift for skew: %.1f pixels", max_shift)
 
     # Create large canvas with transparent background
     pad = int(max_shift)

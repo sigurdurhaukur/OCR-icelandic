@@ -2,11 +2,14 @@ import random
 
 from PIL import Image
 
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
     _clamp_value,
     _copy_paragraph_bboxes,
     _round_bbox,
 )
+
+logger = get_logger(__name__)
 
 
 def _apply_perspective_distortion(
@@ -23,7 +26,9 @@ def _apply_perspective_distortion(
     Returns:
         Tuple of (transformed image, metadata dictionary)
     """
+    logger.debug("Applying perspective distortion: type=%s", distortion_type)
     width, height = image.size
+    logger.debug("Image size: %dx%d", width, height)
 
     # Create a much larger canvas to accommodate the transformation
     # This ensures content doesn't get cut off

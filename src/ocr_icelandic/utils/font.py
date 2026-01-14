@@ -2,6 +2,10 @@
 
 from PIL import ImageFont
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def load_font(
     font_path: str = "Arial.ttf",
@@ -17,7 +21,11 @@ def load_font(
     Returns:
         ImageFont.FreeTypeFont object
     """
+    logger.debug("Attempting to load font from '%s' with size %d", font_path, font_size)
     try:
-        return ImageFont.truetype(font_path, font_size)
-    except OSError:
+        font = ImageFont.truetype(font_path, font_size)
+        logger.debug("Successfully loaded TrueType font: %s", font_path)
+        return font
+    except OSError as e:
+        logger.warning("Failed to load font '%s': %s, using default font", font_path, e)
         return ImageFont.load_default()

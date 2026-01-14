@@ -7,6 +7,10 @@ and supports multiple languages via ISO 639-1/639-3 codes.
 from dataclasses import dataclass
 from typing import ClassVar
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass(frozen=True)
 class LanguageCharacterSet:
@@ -30,16 +34,21 @@ class LanguageCharacterSet:
 
     def __post_init__(self):
         """Validate ISO codes on initialization."""
+        logger.debug(f"Validating language character set: {self.iso_639_1} ({self.name_english})")
         if len(self.iso_639_1) != 2:
+            logger.error(f"Invalid ISO 639-1 code: {self.iso_639_1} (must be 2 characters)")
             raise ValueError(
                 f"ISO 639-1 code must be 2 characters, got: {self.iso_639_1}"
             )
         if len(self.iso_639_3) != 3:
+            logger.error(f"Invalid ISO 639-3 code: {self.iso_639_3} (must be 3 characters)")
             raise ValueError(
                 f"ISO 639-3 code must be 3 characters, got: {self.iso_639_3}"
             )
         if not self.special_characters:
+            logger.error("special_characters cannot be empty")
             raise ValueError("special_characters cannot be empty")
+        logger.debug(f"Language validation passed: {self.iso_639_1}, special_chars={self.special_characters}")
 
 
 class LanguageRegistry:
@@ -165,19 +174,25 @@ class LanguageRegistry:
             >>> print(lang.name_english)
             Icelandic
         """
+        logger.debug(f"Retrieving language: {code}")
         # Try ISO 639-1 first (most common)
         if code in cls.LANGUAGES:
-            return cls.LANGUAGES[code]
+            lang = cls.LANGUAGES[code]
+            logger.debug(f"Found language by ISO 639-1: {code} -> {lang.name_english}")
+            return lang
 
         # Try ISO 639-3
         for lang in cls.LANGUAGES.values():
             if lang.iso_639_3 == code:
+                logger.debug(f"Found language by ISO 639-3: {code} -> {lang.name_english}")
                 return lang
 
         # Not found - raise NotImplementedError as requested
+        supported = ', '.join(cls.list_supported_languages())
+        logger.error(f"Language code not supported: {code}. Supported: {supported}")
         raise NotImplementedError(
             f"Language '{code}' is not supported. "
-            f"Supported languages: {', '.join(cls.list_supported_languages())}. "
+            f"Supported languages: {supported}. "
             f"To add a custom language, use LanguageRegistry.add_custom_language()."
         )
 
@@ -239,7 +254,9 @@ class LanguageRegistry:
             ...     special_characters="あいうえお漢字平仮名片仮名"
             ... ))
         """
+        logger.info(f"Adding custom language: {lang.iso_639_1} ({lang.name_english})")
         if lang.iso_639_1 in cls.LANGUAGES:
+            logger.error(f"Language '{lang.iso_639_1}' already exists in registry")
             raise ValueError(
                 f"Language '{lang.iso_639_1}' already exists in registry. "
                 f"Use a different ISO code or remove the existing entry first."
@@ -248,12 +265,14 @@ class LanguageRegistry:
         # Check for ISO 639-3 conflicts
         for existing_lang in cls.LANGUAGES.values():
             if existing_lang.iso_639_3 == lang.iso_639_3:
+                logger.error(f"ISO 639-3 code '{lang.iso_639_3}' already exists for '{existing_lang.iso_639_1}'")
                 raise ValueError(
                     f"ISO 639-3 code '{lang.iso_639_3}' already exists for "
                     f"language '{existing_lang.iso_639_1}'"
                 )
 
         cls.LANGUAGES[lang.iso_639_1] = lang
+        logger.info(f"Successfully added custom language: {lang.iso_639_1} ({lang.name_english})")
 
     @classmethod
     def remove_language(cls, code: str) -> None:
@@ -268,6 +287,10 @@ class LanguageRegistry:
         Example:
             >>> LanguageRegistry.remove_language("ja")
         """
+        logger.info(f"Removing language: {code}")
         if code not in cls.LANGUAGES:
+            logger.error(f"Language '{code}' not found in registry")
             raise KeyError(f"Language '{code}' not found in registry")
+        lang_name = cls.LANGUAGES[code].name_english
         del cls.LANGUAGES[code]
+        logger.info(f"Successfully removed language: {code} ({lang_name})")

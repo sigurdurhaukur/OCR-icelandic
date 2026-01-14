@@ -25,7 +25,6 @@ from ocr_icelandic.utils.texture import (
     create_paper_drop_shadow,
     discover_backgrounds,
     discover_paper_textures,
-    height_map_to_normal_map,
     texture_to_height_map,
 )
 
@@ -70,7 +69,6 @@ __all__ = [
     "create_paper_drop_shadow",
     "discover_backgrounds",
     "discover_paper_textures",
-    "height_map_to_normal_map",
     "texture_to_height_map",
     # Text layout
     "LinePlacement",

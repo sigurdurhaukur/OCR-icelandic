@@ -3,14 +3,18 @@ import random
 
 from PIL import Image
 
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
     _clamp_value,
     _copy_paragraph_bboxes,
     _round_bbox,
 )
 
+logger = get_logger(__name__)
+
 
 def _rotate_within_bounds(image: Image.Image, angle: float) -> tuple[Image.Image, dict]:
+    logger.debug("Rotating image by %.2f degrees", angle)
     width, height = image.size
 
     # Calculate how much the corners can expand when rotated

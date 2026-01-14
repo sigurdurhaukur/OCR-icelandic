@@ -3,7 +3,6 @@ Font management utilities for OCR Icelandic.
 Handles font discovery, Google Fonts synchronization, and Icelandic character support checking.
 """
 
-import logging
 import random
 import sys
 from pathlib import Path
@@ -15,7 +14,9 @@ import tenacity
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-logger = logging.getLogger(__name__)
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class GoogleFont(TypedDict):

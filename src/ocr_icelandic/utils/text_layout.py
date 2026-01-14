@@ -4,6 +4,24 @@ from dataclasses import dataclass
 
 from PIL import ImageDraw, ImageFont
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class ParagraphFontConfig:
+    """Font configuration for a single paragraph."""
+
+    font_path: str
+    font_size: int
+    bold: bool = False
+    underline: bool = False
+
+    def get_cache_key(self) -> tuple:
+        """Cache key for font loading (excludes underline since it's drawn separately)."""
+        return (self.font_path, self.font_size, self.bold)
+
 
 @dataclass
 class WrappedParagraph:
@@ -12,6 +30,7 @@ class WrappedParagraph:
     lines: list[str]
     text: str
     has_text: bool
+    font_config: "ParagraphFontConfig | None" = None
 
 
 @dataclass
@@ -52,18 +71,22 @@ def wrap_text(
     Returns:
         WrapResult containing wrapped paragraphs and overflow flag
     """
+    logger.debug("Wrapping text to fit within %d pixels (tab_width=%d)", max_width, tab_width)
     paragraphs = text.split("\n")
     wrapped_paragraphs: list[WrappedParagraph] = []
     has_overflow = False
+    total_wrapped_lines = 0
 
-    for paragraph in paragraphs:
+    for para_idx, paragraph in enumerate(paragraphs):
         stripped_paragraph = paragraph.strip()
         if not stripped_paragraph:
+            logger.debug("Paragraph %d is empty", para_idx)
             wrapped_paragraphs.append(
                 WrappedParagraph(lines=[], text="", has_text=False)
             )
             continue
 
+        logger.debug("Wrapping paragraph %d with %d characters", para_idx, len(stripped_paragraph))
         leading_whitespace = ""
         left_stripped = paragraph.lstrip()
         if len(paragraph) > len(left_stripped):
@@ -103,6 +126,7 @@ def wrap_text(
                 bbox = draw.textbbox((0, 0), test_line, font=font)
                 if bbox[2] - bbox[0] > max_width:
                     # Word is too long to fit on a line - mark as overflow
+                    logger.debug("Word '%s' exceeds max width (%d > %d), marking overflow", word, bbox[2] - bbox[0], max_width)
                     has_overflow = True
                     paragraph_lines.append(
                         (leading_whitespace if is_first_line else "") + word
@@ -115,12 +139,15 @@ def wrap_text(
                 (leading_whitespace if is_first_line else "") + " ".join(current_line)
             )
 
+        logger.debug("Paragraph %d wrapped into %d lines", para_idx, len(paragraph_lines))
+        total_wrapped_lines += len(paragraph_lines)
         wrapped_paragraphs.append(
             WrappedParagraph(
                 lines=paragraph_lines, text=stripped_paragraph, has_text=True
             )
         )
 
+    logger.debug("Text wrapping complete: %d total lines, overflow=%s", total_wrapped_lines, has_overflow)
     return WrapResult(paragraphs=wrapped_paragraphs, has_overflow=has_overflow)
 
 
@@ -139,6 +166,7 @@ def arrange_lines_in_columns(
     Returns:
         Tuple of (line placements, column line counts)
     """
+    logger.debug("Arranging %d paragraphs into %d columns (max %d lines per column)", len(paragraphs), num_columns, max_lines_per_column)
     placements: list[LinePlacement] = []
     column_counts = [0] * num_columns
     current_column = 0
@@ -155,6 +183,7 @@ def arrange_lines_in_columns(
         nonlocal current_column
         advance_column()
         if current_column >= num_columns:
+            logger.debug("Column overflow: current_column=%d >= num_columns=%d", current_column, num_columns)
             return False
         placements.append(
             LinePlacement(
@@ -168,16 +197,24 @@ def arrange_lines_in_columns(
         column_counts[current_column] += 1
         return True
 
+    lines_added = 0
     for idx, paragraph in enumerate(paragraphs):
         if paragraph.has_text:
             for line in paragraph.lines:
                 if not add_line(line, idx, is_blank=False):
+                    logger.debug("Ran out of column space at paragraph %d", idx)
                     return placements, column_counts
+                lines_added += 1
             if idx < len(paragraphs) - 1:
                 if not add_line("", None, is_blank=True):
+                    logger.debug("Ran out of column space after paragraph %d blank line", idx)
                     return placements, column_counts
+                lines_added += 1
         else:
             if not add_line("", None, is_blank=True):
+                logger.debug("Ran out of column space at empty paragraph %d", idx)
                 return placements, column_counts
+            lines_added += 1
 
+    logger.debug("Column arrangement complete: %d total lines placed, distribution: %s", lines_added, column_counts)
     return placements, column_counts

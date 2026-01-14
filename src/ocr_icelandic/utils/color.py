@@ -3,13 +3,21 @@
 import numpy as np
 from PIL import Image
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def color_to_rgb(color: str | tuple[int, int, int]) -> tuple[int, int, int]:
     """Convert a color string or tuple to RGB tuple."""
     if isinstance(color, tuple):
+        logger.debug("Converting tuple color to RGB: %s", color[:3])
         return color[:3]
+    logger.debug("Converting string color '%s' to RGB tuple", color)
     temp = Image.new("RGB", (1, 1), color)
-    return temp.getpixel((0, 0))
+    rgb = temp.getpixel((0, 0))
+    logger.debug("Converted string color '%s' to RGB: %s", color, rgb)
+    return rgb
 
 
 def calculate_luminance(color: tuple[int, int, int]) -> float:
@@ -19,20 +27,25 @@ def calculate_luminance(color: tuple[int, int, int]) -> float:
     Returns luminance in 0.0-1.0 range (gamma-corrected).
     """
     r, g, b = color
+    logger.debug("Calculating luminance for RGB color: (%d, %d, %d)", r, g, b)
     # Normalize to 0-1 range
     r, g, b = r / 255.0, g / 255.0, b / 255.0
     # Apply gamma correction
     r = r / 12.92 if r <= 0.03928 else ((r + 0.055) / 1.055) ** 2.4
     g = g / 12.92 if g <= 0.03928 else ((g + 0.055) / 1.055) ** 2.4
     b = b / 12.92 if b <= 0.03928 else ((b + 0.055) / 1.055) ** 2.4
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    logger.debug("Calculated luminance: %.4f", luminance)
+    return luminance
 
 
 def is_grayscale(color: tuple[int, int, int], threshold: int = 30) -> bool:
     """Check if a color is grayscale (low saturation)."""
     r, g, b = color
     avg = (r + g + b) / 3
-    return all(abs(c - avg) < threshold for c in [r, g, b])
+    is_gray = all(abs(c - avg) < threshold for c in [r, g, b])
+    logger.debug("Checked if RGB(%d, %d, %d) is grayscale (threshold=%d): %s", r, g, b, threshold, is_gray)
+    return is_gray
 
 
 def get_blend_mode(
@@ -81,7 +94,9 @@ def get_blend_mode(
         and lum_diff > 0.2
         and font_is_gray
     ):
-        return "multiply"
+        blend_mode = "multiply"
+        logger.debug("Selected 'multiply' blend mode for dark text on light background (font_lum=%.3f, bg_lum=%.3f)", font_lum, bg_lum)
+        return blend_mode
 
     # Light text on dark background -> screen
     # Conditions: background is dark, font is lighter than background, mostly grayscale
@@ -91,11 +106,15 @@ def get_blend_mode(
         and lum_diff > 0.2
         and font_is_gray
     ):
-        return "screen"
+        blend_mode = "screen"
+        logger.debug("Selected 'screen' blend mode for light text on dark background (font_lum=%.3f, bg_lum=%.3f)", font_lum, bg_lum)
+        return blend_mode
 
     # Colored text or insufficient contrast -> normal alpha compositing
     else:
-        return "normal"
+        blend_mode = "normal"
+        logger.debug("Using 'normal' blend mode: insufficient contrast or colored text (font_lum=%.3f, bg_lum=%.3f, diff=%.3f)", font_lum, bg_lum, lum_diff)
+        return blend_mode
 
 
 def blend_text_layer(
@@ -122,11 +141,13 @@ def blend_text_layer(
     Returns:
         Blended image with text showing paper texture through it
     """
+    logger.debug("Blending text layer using '%s' mode with color RGB(%d, %d, %d)", blend_mode, font_color[0], font_color[1], font_color[2])
     # Convert to numpy for blending calculations
     bg_array = np.array(background, dtype=np.float32)
     mask_array = np.array(text_mask, dtype=np.float32) / 255.0
 
     if blend_mode == "multiply":
+        logger.debug("Applying multiply blend: dark text on light background")
         # Multiply blend: result = (A * B) / 255
         # For dark text on light background
         # Create a layer where text areas have font_color and non-text areas are white (neutral for multiply)
@@ -138,6 +159,7 @@ def blend_text_layer(
         result = (bg_array * text_array) / 255.0
 
     elif blend_mode == "screen":
+        logger.debug("Applying screen blend: light text on dark background")
         # Screen blend: result = 255 - ((255 - A) * (255 - B)) / 255
         # For light text on dark background
         # Create a layer where text areas have font_color and non-text areas are black (neutral for screen)
@@ -149,6 +171,7 @@ def blend_text_layer(
         result = 255.0 - ((255.0 - bg_array) * (255.0 - text_array)) / 255.0
 
     else:  # normal
+        logger.debug("Applying normal alpha compositing blend")
         # Normal blend: standard alpha compositing
         # Text replaces background where mask is white
         result = bg_array.copy()
@@ -159,4 +182,5 @@ def blend_text_layer(
 
     # Clip to valid range and convert back to PIL
     result = np.clip(result, 0, 255).astype(np.uint8)
+    logger.debug("Text layer blended successfully")
     return Image.fromarray(result, mode="RGB")

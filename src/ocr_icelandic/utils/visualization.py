@@ -4,6 +4,10 @@ import random
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def dummy_text_with_line_breaks(num_sentences: int = 5) -> str:
     """Generate dummy text for testing.
@@ -14,6 +18,7 @@ def dummy_text_with_line_breaks(num_sentences: int = 5) -> str:
     Returns:
         String with randomly selected test sentences
     """
+    logger.debug("Generating dummy text with %d sentences", num_sentences)
     sentences = [
         "Icelandic characters: ð, þ, æ, ö, á, é, í, ó, ú.",
         # "This is a sample sentence for OCR training.",
@@ -29,7 +34,9 @@ def dummy_text_with_line_breaks(num_sentences: int = 5) -> str:
         "„Megi hann fara og vera en ég vona svo sannarlega að hann komi aldrei aftur til Íslands,“ segir Helgi Magnús Gunnarsson fyrrverandi vararíkssaksóknari um nýjustu vendingar í máli Mohamads Kourani. Helgi, sem sætti líflátshótunum",
     ]
     selected_sentences = random.choices(sentences, k=num_sentences)
-    return "\n".join(selected_sentences)
+    result = "\n".join(selected_sentences)
+    logger.debug("Generated dummy text of length %d", len(result))
+    return result
 
 
 def visualise_bboxes(
@@ -53,6 +60,7 @@ def visualise_bboxes(
     Returns:
         PIL Image object with bounding boxes drawn
     """
+    logger.debug("Visualizing %d bounding boxes on image (size=%dx%d)", len(paragraph_bboxes), image.width, image.height)
     # Create a copy to avoid modifying the original
     visualized_image = image.copy()
     draw = ImageDraw.Draw(visualized_image)
@@ -76,17 +84,21 @@ def visualise_bboxes(
         label_font = ImageFont.load_default()
 
     # Draw each bbox
+    drawn_count = 0
     for idx, bbox_data in enumerate(paragraph_bboxes):
         # Get bbox coordinates
         bbox = bbox_data.get("bbox", [0, 0, 0, 0])
         if len(bbox) != 4:
+            logger.debug("Skipping bbox %d: invalid format", idx)
             continue
 
         x1, y1, x2, y2 = bbox
+        drawn_count += 1
 
         # Select color from palette (cycle sequentially)
         color = color_palette[idx % len(color_palette)]
 
+        logger.debug("Drawing bbox %d: coordinates (%d, %d, %d, %d)", idx, x1, y1, x2, y2)
         # Draw rectangle
         draw.rectangle([x1, y1, x2, y2], outline=color, width=line_width)
 
@@ -132,4 +144,5 @@ def visualise_bboxes(
                     font=label_font,
                 )
 
+    logger.debug("Visualization complete: drew %d bounding boxes", drawn_count)
     return visualized_image

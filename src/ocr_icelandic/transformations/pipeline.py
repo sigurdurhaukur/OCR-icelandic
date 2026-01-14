@@ -13,10 +13,12 @@ from typing import Any
 
 from PIL import Image
 
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.effects import (
     blur,
     dusty_paper,
     ink_splashes,
+    paper_edge_unevenness,
     reverse_bleed_through,
     textured_stains,
 )
@@ -30,6 +32,8 @@ from ocr_icelandic.transformations.rotate import rotate
 from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 from ocr_icelandic.transformations.skew import skew
 from ocr_icelandic.transformations.tight_crop import tight_crop
+
+logger = get_logger(__name__)
 
 # Type alias for transformation functions
 TransformFunc = Callable[
@@ -50,6 +54,10 @@ TRANSFORMATION_CONFIG: dict[str, dict[str, dict[str, Any]]] = {
         },
         "textured_stains": {"function": textured_stains, "probability": 0.2},
         "tight_crop": {"function": tight_crop, "probability": 0.25},
+        "paper_edge_unevenness": {
+            "function": paper_edge_unevenness,
+            "probability": 0.15,
+        },
     },
     "perspective": {
         "rotate": {"function": rotate, "probability": 0.6},
@@ -73,6 +81,7 @@ PIPELINE_NO_BACKGROUND_PROBABILITIES: dict[str, float] = {
     "reverse_bleed_through": 0.2,
     "textured_stains": 0.2,
     "tight_crop": 0.25,
+    "paper_edge_unevenness": 0.85,
     # Perspective transformations - default probabilities
     "rotate": 0.6,
     "skew": 0.1,
@@ -91,6 +100,7 @@ PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES: dict[str, float] = {
     "reverse_bleed_through": 0.2,
     "textured_stains": 0.2,
     "tight_crop": 0.25,
+    "paper_edge_unevenness": 0.85,
     # Perspective transformations - default probabilities
     "rotate": 0.6,
     "skew": 0.1,
@@ -109,6 +119,7 @@ PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES: dict[str, float] = {
     "reverse_bleed_through": 0.2,
     "textured_stains": 0.2,
     "tight_crop": 0.25,
+    "paper_edge_unevenness": 0.85,
     # Perspective transformations - default probabilities
     "rotate": 0.6,
     "skew": 0.1,
@@ -144,6 +155,7 @@ def _select_transformations_by_probability(
 
         # Select based on probability
         if random.random() < prob:
+            logger.debug("Selected transformation: %s (probability: %.2f)", name, prob)
             selected.append(config["function"])
 
     return selected
@@ -242,21 +254,26 @@ def apply_random_transformation(
     Returns:
         Tuple of (transformed RGBA image, transformation metadata, transformed bboxes)
     """
+    logger.debug("Starting transformation pipeline: use_background=%s, background_has_shadow=%s", use_background, background_has_shadow)
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Select pipeline based on background configuration
     if not use_background:
         # Pipeline 1: No photo background
+        logger.debug("Using pipeline: No background")
         transformations_to_apply = _get_pipeline_no_background()
     elif background_has_shadow:
         # Pipeline 2: Photo background with shadow (e.g., desk)
+        logger.debug("Using pipeline: Background with shadow")
         transformations_to_apply = _get_pipeline_background_with_shadow()
     else:
         # Pipeline 3: Photo background without shadow (e.g., landscape)
+        logger.debug("Using pipeline: Background without shadow")
         transformations_to_apply = _get_pipeline_background_no_shadow()
 
     # Apply probability overrides if provided (for custom behavior)
     if probability_overrides:
+        logger.debug("Applying custom probability overrides")
         # Re-select transformations with custom probabilities
         transformations_to_apply = []
         for category_name, category_config in TRANSFORMATION_CONFIG.items():
@@ -267,12 +284,15 @@ def apply_random_transformation(
             )
 
     # Apply selected transformations
+    logger.debug("Applying %d transformations", len(transformations_to_apply))
     transformation_meta: list[dict[str, Any]] = []
-    for transform in transformations_to_apply:
+    for idx, transform in enumerate(transformations_to_apply):
+        logger.debug("Applying transformation %d/%d", idx + 1, len(transformations_to_apply))
         image, meta, paragraph_bboxes_copy = transform(
             image, bg_color, paragraph_bboxes_copy
         )
         transformation_meta.append(meta)
 
+    logger.debug("Transformation pipeline complete: %d transformations applied", len(transformation_meta))
     # Return RGBA image directly (no RGB composite here)
     return image, transformation_meta, paragraph_bboxes_copy

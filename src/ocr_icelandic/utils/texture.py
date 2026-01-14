@@ -7,6 +7,10 @@ import cv2
 import numpy as np
 from PIL import Image, ImageFilter
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def discover_paper_textures(papers_dir: str = "assets/papers") -> list[str]:
     """
@@ -18,17 +22,123 @@ def discover_paper_textures(papers_dir: str = "assets/papers") -> list[str]:
     Returns:
         List of absolute paths to paper texture files
     """
+    logger.debug("Discovering paper textures in directory: %s", papers_dir)
     paper_paths = []
     papers_path = Path(papers_dir)
 
     if not papers_path.exists():
+        logger.warning("Paper textures directory does not exist: %s", papers_dir)
         return paper_paths
 
     # Look for common image formats
     for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
         paper_paths.extend(str(p) for p in papers_path.glob(ext))
 
+    logger.debug("Found %d paper texture files", len(paper_paths))
     return sorted(paper_paths)
+
+
+def _tile_texture_seamlessly(
+    texture: Image.Image,
+    target_size: tuple[int, int],
+    random_offset: bool = True,
+    blend_edges: bool = True,
+    edge_blend_width: int = 10,
+) -> Image.Image:
+    """
+    Tile texture to fill target size with seamless edges.
+
+    Uses mirror tiling (flip alternating tiles) and edge blending
+    to minimize visible seams at tile boundaries.
+
+    Args:
+        texture: Source texture to tile
+        target_size: (width, height) of target image
+        random_offset: Apply random offset for variety
+        blend_edges: Apply Gaussian blending at tile boundaries
+        edge_blend_width: Width of edge blend in pixels
+
+    Returns:
+        Tiled texture matching target_size
+    """
+    target_width, target_height = target_size
+    tex_width, tex_height = texture.size
+
+    # If texture is larger, just crop with random offset
+    if tex_width >= target_width and tex_height >= target_height:
+        max_offset_x = max(0, tex_width - target_width)
+        max_offset_y = max(0, tex_height - target_height)
+        offset_x = random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
+        offset_y = random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+        return texture.crop((offset_x, offset_y, offset_x + target_width, offset_y + target_height))
+
+    # Calculate tiles needed (add extra for random offset)
+    tiles_x = (target_width // tex_width) + 2
+    tiles_y = (target_height // tex_height) + 2
+
+    # Create tiled texture with mirror pattern to reduce repetition
+    tiled = Image.new(texture.mode, (tex_width * tiles_x, tex_height * tiles_y))
+    for i in range(tiles_x):
+        for j in range(tiles_y):
+            # Mirror flip alternating tiles (checkerboard pattern)
+            tile = texture
+            if (i + j) % 2 == 1:  # Alternate tiles
+                tile = texture.transpose(Image.FLIP_LEFT_RIGHT)
+            tiled.paste(tile, (i * tex_width, j * tex_height))
+
+    # Apply edge blending if enabled (smooth transitions at tile boundaries)
+    if blend_edges:
+        tiled = _apply_edge_blending(tiled, tex_width, tex_height, edge_blend_width)
+
+    # Crop to target size with random offset
+    max_offset_x = max(0, tiled.width - target_width)
+    max_offset_y = max(0, tiled.height - target_height)
+    offset_x = random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
+    offset_y = random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+
+    return tiled.crop((offset_x, offset_y, offset_x + target_width, offset_y + target_height))
+
+
+def _apply_edge_blending(
+    tiled: Image.Image,
+    tile_width: int,
+    tile_height: int,
+    blend_width: int,
+) -> Image.Image:
+    """
+    Apply Gaussian blending at tile boundaries to hide seams.
+
+    Creates gradient masks at tile edges and applies localized blur
+    to smooth transitions between tiles.
+
+    Args:
+        tiled: Tiled texture image
+        tile_width: Width of individual tiles
+        tile_height: Height of individual tiles
+        blend_width: Width of edge blend in pixels
+
+    Returns:
+        Tiled texture with smoothed edges
+    """
+    # Create blend mask for vertical seams
+    for i in range(1, tiled.width // tile_width):
+        x = i * tile_width
+        if x < tiled.width - blend_width:
+            # Apply slight blur near seam
+            region = tiled.crop((x - blend_width//2, 0, x + blend_width//2, tiled.height))
+            blurred = region.filter(ImageFilter.GaussianBlur(radius=1.0))
+            tiled.paste(blurred, (x - blend_width//2, 0))
+
+    # Create blend mask for horizontal seams
+    for j in range(1, tiled.height // tile_height):
+        y = j * tile_height
+        if y < tiled.height - blend_width:
+            # Apply slight blur near seam
+            region = tiled.crop((0, y - blend_width//2, tiled.width, y + blend_width//2))
+            blurred = region.filter(ImageFilter.GaussianBlur(radius=1.0))
+            tiled.paste(blurred, (0, y - blend_width//2))
+
+    return tiled
 
 
 def apply_paper_texture(
@@ -52,36 +162,20 @@ def apply_paper_texture(
     Returns:
         Image with paper texture applied
     """
+    logger.debug("Applying paper texture from '%s' with blend_alpha=%.2f", texture_path, blend_alpha)
     try:
         # Load the texture in RGB mode to preserve all detail
         texture = Image.open(texture_path).convert("RGB")
+        logger.debug("Loaded texture: %dx%d", texture.width, texture.height)
 
-        # Resize or tile texture to match image size
+        # Use seamless tiling for paper texture
         img_width, img_height = image.size
-        tex_width, tex_height = texture.size
-
-        # If texture is smaller, tile it
-        if tex_width < img_width or tex_height < img_height:
-            # Calculate how many tiles we need
-            tiles_x = (img_width // tex_width) + 2
-            tiles_y = (img_height // tex_height) + 2
-
-            # Create tiled texture
-            tiled = Image.new("RGB", (tex_width * tiles_x, tex_height * tiles_y))
-            for i in range(tiles_x):
-                for j in range(tiles_y):
-                    tiled.paste(texture, (i * tex_width, j * tex_height))
-
-            texture = tiled
-
-        # Crop to exact size with random offset for variety
-        max_offset_x = max(0, texture.width - img_width)
-        max_offset_y = max(0, texture.height - img_height)
-        offset_x = random.randint(0, max_offset_x) if max_offset_x > 0 else 0
-        offset_y = random.randint(0, max_offset_y) if max_offset_y > 0 else 0
-
-        texture = texture.crop(
-            (offset_x, offset_y, offset_x + img_width, offset_y + img_height)
+        texture = _tile_texture_seamlessly(
+            texture,
+            (img_width, img_height),
+            random_offset=True,
+            blend_edges=True,
+            edge_blend_width=10
         )
 
         # Convert to numpy arrays for processing
@@ -119,12 +213,13 @@ def apply_paper_texture(
 
         # Convert back to PIL Image
         result = Image.fromarray(final_array, mode="RGB")
+        logger.debug("Paper texture applied successfully")
 
         return result
 
     except Exception as e:
         # If texture loading fails, return original image
-        print(f"Warning: Failed to apply paper texture from {texture_path}: {e}")
+        logger.error("Failed to apply paper texture from '%s': %s", texture_path, e)
         return image
 
 
@@ -140,11 +235,13 @@ def discover_backgrounds(
     Returns:
         Tuple of (no_shadow_backgrounds, with_shadow_backgrounds)
     """
+    logger.debug("Discovering background images in: %s", backgrounds_dir)
     no_shadow_paths = []
     with_shadow_paths = []
 
     backgrounds_path = Path(backgrounds_dir)
     if not backgrounds_path.exists():
+        logger.warning("Backgrounds directory does not exist: %s", backgrounds_dir)
         return no_shadow_paths, with_shadow_paths
 
     # Discover no_shadow backgrounds
@@ -152,12 +249,14 @@ def discover_backgrounds(
     if no_shadow_dir.exists():
         for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
             no_shadow_paths.extend(str(p) for p in no_shadow_dir.rglob(ext))
+        logger.debug("Found %d no_shadow backgrounds", len(no_shadow_paths))
 
     # Discover with_shadow backgrounds
     with_shadow_dir = backgrounds_path / "with_shadow"
     if with_shadow_dir.exists():
         for ext in ["*.png", "*.jpg", "*.jpeg", "*.bmp"]:
             with_shadow_paths.extend(str(p) for p in with_shadow_dir.rglob(ext))
+        logger.debug("Found %d with_shadow backgrounds", len(with_shadow_paths))
 
     return sorted(no_shadow_paths), sorted(with_shadow_paths)
 
@@ -228,6 +327,7 @@ def apply_background_image(
     """
     from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 
+    logger.debug("Applying background image from '%s'", background_path)
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     try:
@@ -235,6 +335,7 @@ def apply_background_image(
         background = Image.open(background_path).convert("RGBA")
         bg_width, bg_height = background.size
         fg_width, fg_height = foreground.size
+        logger.debug("Loaded background (%dx%d) and foreground (%dx%d)", bg_width, bg_height, fg_width, fg_height)
 
         # Convert foreground to RGBA if needed
         if foreground.mode != "RGBA":
@@ -245,6 +346,7 @@ def apply_background_image(
             scale_factor = max(fg_width / bg_width, fg_height / bg_height) * 1.2
             new_bg_width = int(bg_width * scale_factor)
             new_bg_height = int(bg_height * scale_factor)
+            logger.debug("Scaling background from (%dx%d) to (%dx%d)", bg_width, bg_height, new_bg_width, new_bg_height)
             background = background.resize(
                 (new_bg_width, new_bg_height), Image.Resampling.BICUBIC
             )
@@ -256,6 +358,9 @@ def apply_background_image(
             x = (bg_width - fg_width) // 2
             y = (bg_height - fg_height) // 2
             position = (x, y)
+            logger.debug("Auto-centered foreground at position (%d, %d)", x, y)
+        else:
+            logger.debug("Using provided position: (%d, %d)", position[0], position[1])
 
         # Create drop shadow for the paper
         shadow, shadow_offset = create_paper_drop_shadow(foreground)
@@ -309,7 +414,7 @@ def texture_to_height_map(
     texture_path: str,
     size: tuple[int, int],
     blur_radius: float = 3.0,
-    contrast: float = 3.0,
+    contrast: float = 1.5,
 ) -> np.ndarray:
     """
     Convert paper texture to a normalized height map using luminance.
@@ -328,33 +433,24 @@ def texture_to_height_map(
     Returns:
         Height map as float32 array (0.0 to 1.0) with shape (height, width)
     """
+    logger.debug("Converting texture to height map: size=%dx%d, blur=%.1f, contrast=%.1f", size[0], size[1], blur_radius, contrast)
     # Load texture and convert to grayscale
     texture = Image.open(texture_path).convert("L")
     img_width, img_height = size
-    tex_width, tex_height = texture.size
+    logger.debug("Loaded texture for height map: %dx%d", texture.width, texture.height)
 
-    # Tile texture if smaller than target size
-    if tex_width < img_width or tex_height < img_height:
-        tiles_x = (img_width // tex_width) + 2
-        tiles_y = (img_height // tex_height) + 2
-
-        tiled = Image.new("L", (tex_width * tiles_x, tex_height * tiles_y))
-        for i in range(tiles_x):
-            for j in range(tiles_y):
-                tiled.paste(texture, (i * tex_width, j * tex_height))
-        texture = tiled
-
-    # Crop to exact size with random offset for variety
-    max_offset_x = max(0, texture.width - img_width)
-    max_offset_y = max(0, texture.height - img_height)
-    offset_x = random.randint(0, max_offset_x) if max_offset_x > 0 else 0
-    offset_y = random.randint(0, max_offset_y) if max_offset_y > 0 else 0
-    texture = texture.crop(
-        (offset_x, offset_y, offset_x + img_width, offset_y + img_height)
+    # Use seamless tiling for height map texture
+    texture = _tile_texture_seamlessly(
+        texture,
+        size,
+        random_offset=True,
+        blend_edges=True,
+        edge_blend_width=8  # Slightly smaller for height maps
     )
 
     # Apply Gaussian blur for smooth gradients
     if blur_radius > 0:
+        logger.debug("Applying Gaussian blur with radius %.1f", blur_radius)
         texture = texture.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
     # Convert to float32 and normalize to 0-1 range
@@ -364,6 +460,7 @@ def texture_to_height_map(
     # First, stretch to full range (histogram stretching)
     min_val = height_map.min()
     max_val = height_map.max()
+    logger.debug("Height map range before stretching: [%.4f, %.4f]", min_val, max_val)
     if max_val > min_val:
         height_map = (height_map - min_val) / (max_val - min_val)
 
@@ -371,65 +468,16 @@ def texture_to_height_map(
     if contrast != 1.0:
         height_map = (height_map - 0.5) * contrast + 0.5
         height_map = np.clip(height_map, 0.0, 1.0)
+        logger.debug("Applied contrast enhancement: multiplier=%.1f", contrast)
 
+    logger.debug("Height map created successfully")
     return height_map
-
-
-def height_map_to_normal_map(
-    height_map: np.ndarray,
-    strength: float = 1.0,
-) -> np.ndarray:
-    """
-    Convert height map to normal map using Sobel gradients.
-
-    The normal map encodes surface orientation for lighting calculations.
-    Each pixel contains a 3D normal vector (nx, ny, nz) where:
-    - nx: horizontal component (negative = surface facing left)
-    - ny: vertical component (negative = surface facing up)
-    - nz: depth component (always positive, facing viewer)
-
-    Args:
-        height_map: Height map as float32 array (0.0-1.0) with shape (H, W)
-        strength: Multiplier for gradient effect (higher = more pronounced normals)
-
-    Returns:
-        Normal map as float32 array of shape (H, W, 3) with normalized vectors
-    """
-    # Compute gradients using Sobel operator
-    # ksize=5 gives smoother gradients
-    grad_x = cv2.Sobel(height_map, cv2.CV_64F, 1, 0, ksize=5)
-    grad_y = cv2.Sobel(height_map, cv2.CV_64F, 0, 1, ksize=5)
-
-    # Scale gradients by strength
-    grad_x *= strength
-    grad_y *= strength
-
-    # Construct normal vectors: N = normalize(-dx, -dy, 1)
-    # The negative sign makes gradients point "outward" from the surface
-    h, w = height_map.shape
-    normals = np.zeros((h, w, 3), dtype=np.float32)
-    normals[:, :, 0] = -grad_x  # X component
-    normals[:, :, 1] = -grad_y  # Y component
-    normals[:, :, 2] = 1.0  # Z component (always pointing toward viewer)
-
-    # Normalize to unit vectors
-    magnitude = np.sqrt(
-        normals[:, :, 0] ** 2 + normals[:, :, 1] ** 2 + normals[:, :, 2] ** 2
-    )
-    magnitude = np.maximum(magnitude, 1e-6)  # Avoid division by zero
-    normals /= magnitude[:, :, np.newaxis]
-
-    return normals
 
 
 def apply_displacement_from_texture(
     image: Image.Image,
     texture_path: str,
-    displacement_strength: float = 2.0,
-    apply_lighting: bool = True,
-    light_direction: tuple[float, float, float] = (-0.5, -0.5, 1.0),
-    ambient: float = 0.6,
-    diffuse: float = 0.4,
+    displacement_strength: float = 0.5,
 ) -> Image.Image:
     """
     Apply displacement warping and lighting based on paper texture.
@@ -444,20 +492,18 @@ def apply_displacement_from_texture(
         image: Image to warp (typically with text already blended)
         texture_path: Path to paper texture image
         displacement_strength: Pixel displacement multiplier (1.0-5.0 typical)
-        apply_lighting: Whether to apply normal-based lighting effects
-        light_direction: Light direction vector (x, y, z), default upper-left
-        ambient: Ambient light intensity (0-1), baseline illumination
-        diffuse: Diffuse light intensity (0-1), directional illumination
 
     Returns:
         Warped (and optionally lit) image
     """
+    logger.debug("Applying displacement from texture: '%s' with strength=%.2f", texture_path, displacement_strength)
     # Get image dimensions
     img_width, img_height = image.size
+    logger.debug("Image dimensions: %dx%d", img_width, img_height)
 
     # Generate height map from texture
     height_map = texture_to_height_map(
-        texture_path, (img_width, img_height), blur_radius=3.0
+        texture_path, (img_width, img_height), blur_radius=1.0
     )
 
     # Compute gradients for displacement
@@ -470,6 +516,7 @@ def apply_displacement_from_texture(
     if max_grad > 0:
         grad_x /= max_grad
         grad_y /= max_grad
+        logger.debug("Gradient normalization complete: max_gradient=%.4f", max_grad)
 
     # Create displacement maps
     # Pixels shift perpendicular to gradient (along contour lines)
@@ -485,6 +532,7 @@ def apply_displacement_from_texture(
 
     # Apply remapping with bilinear interpolation
     # BORDER_REFLECT prevents edge artifacts
+    logger.debug("Applying displacement mapping")
     remapped = cv2.remap(
         img_array,
         map_x,
@@ -493,38 +541,6 @@ def apply_displacement_from_texture(
         borderMode=cv2.BORDER_REFLECT,
     )
 
-    # Apply lighting if requested
-    if apply_lighting:
-        # Generate normal map
-        normal_map = height_map_to_normal_map(height_map, strength=1.0)
-
-        # Normalize light direction
-        light = np.array(light_direction, dtype=np.float32)
-        light = light / np.linalg.norm(light)
-
-        # Compute N dot L (dot product of normal and light direction)
-        n_dot_l = (
-            normal_map[:, :, 0] * light[0]
-            + normal_map[:, :, 1] * light[1]
-            + normal_map[:, :, 2] * light[2]
-        )
-        n_dot_l = np.clip(n_dot_l, 0, 1)
-
-        # Compute lighting intensity
-        intensity = ambient + diffuse * n_dot_l
-        intensity = np.clip(intensity, 0, 1.5)  # Allow slight overexposure
-
-        # Apply to image
-        remapped_float = remapped.astype(np.float32)
-        if len(remapped.shape) == 3:
-            # Color image (RGB or RGBA)
-            for c in range(min(3, remapped.shape[2])):
-                remapped_float[:, :, c] *= intensity
-        else:
-            # Grayscale
-            remapped_float *= intensity
-
-        remapped = np.clip(remapped_float, 0, 255).astype(np.uint8)
-
+    logger.debug("Displacement mapping complete")
     # Convert back to PIL Image
     return Image.fromarray(remapped)

@@ -12,7 +12,10 @@ from typing import Any
 
 from PIL import Image, ImageDraw, ImageFilter
 
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
+
+logger = get_logger(__name__)
 
 
 def light_reflection(
@@ -33,6 +36,7 @@ def light_reflection(
     Returns:
         Tuple of (image with reflection, metadata dict, unchanged bboxes)
     """
+    logger.debug("Applying light reflection transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Get image dimensions
@@ -45,6 +49,7 @@ def light_reflection(
     # Get ellipse size
     ellipse_width = random.randint(width // 8, width // 4)
     ellipse_height = random.randint(height // 8, height // 6)
+    logger.debug("Light reflection: center=(%d,%d), ellipse=(%d,%d)", center_x, center_y, ellipse_width, ellipse_height)
 
     # Create a mask for the reflection
     mask = Image.new("L", (width, height), 0)
