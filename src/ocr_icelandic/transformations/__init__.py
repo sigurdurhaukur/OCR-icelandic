@@ -7,7 +7,6 @@ OCR training data more realistic. Transformations are organized into:
 - lighting.py: Lighting effects (reflections, shadows, gradients)
 - perspective.py: 3D perspective distortions
 - rotate.py: Rotation transformations
-- skew.py: Horizontal skew/shear transformations
 - tight_crop.py: Content-aware cropping
 - pipeline.py: Configuration and orchestration
 

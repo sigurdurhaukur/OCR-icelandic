@@ -7,7 +7,6 @@ from PIL import Image
 from ocr_icelandic.utils import create_image_with_text
 from ocr_icelandic.transformations.transformations import (
     blur,
-    ink_splashes,
     dusty_paper,
     reverse_bleed_through,
     textured_stains,
@@ -16,7 +15,6 @@ from ocr_icelandic.transformations.transformations import (
     apply_random_transformation,
 )
 from ocr_icelandic.transformations.rotate import rotate
-from ocr_icelandic.transformations.skew import skew
 from ocr_icelandic.transformations.perspective import perspective
 
 
@@ -110,20 +108,6 @@ class TestContentTransformations:
         result = blur(sample_image_no_text, bg_color="white", paragraph_bboxes=None)
         validate_transformation_output(result, sample_image_no_text, has_bboxes=False)
 
-    def test_ink_splashes_with_text(self, sample_image_with_text):
-        """Test ink splashes transformation."""
-        image, _, bboxes = sample_image_with_text
-        result = ink_splashes(image, bg_color="white", paragraph_bboxes=bboxes)
-
-        validate_transformation_output(result, image)
-        _, metadata, _ = result
-
-        assert metadata["transformation"] == "ink_splashes"
-        assert "splashes" in metadata
-        assert 3 <= metadata["splashes"] <= 6
-
-        result[0].save("local_output/transformations/test_ink_splashes.png")
-
     def test_dusty_paper_with_text(self, sample_image_with_text):
         """Test dusty paper transformation."""
         image, _, bboxes = sample_image_with_text
@@ -203,23 +187,6 @@ class TestPerspectiveTransformations:
         """Test rotation without text."""
         result = rotate(sample_image_no_text, bg_color="white", paragraph_bboxes=None)
         validate_transformation_output(result, sample_image_no_text, has_bboxes=False)
-
-    def test_skew_with_text(self, sample_image_with_text):
-        """Test skew transformation."""
-        image, _, bboxes = sample_image_with_text
-        result = skew(image, bg_color="white", paragraph_bboxes=bboxes)
-
-        validate_transformation_output(result, image)
-        transformed_img, metadata, transformed_bboxes = result
-
-        assert metadata["transformation"] == "skew"
-        assert "skew_factor" in metadata
-        assert -0.2 <= metadata["skew_factor"] <= 0.2
-
-        # Verify bboxes were transformed
-        assert len(transformed_bboxes) == len(bboxes)
-
-        result[0].save("local_output/transformations/test_skew.png")
 
     def test_perspective_with_text(self, sample_image_with_text):
         """Test perspective transformation."""
@@ -407,7 +374,7 @@ class TestConsistency:
         image, _, original_bboxes = sample_image_with_text
 
         # Content transformations should not alter bboxes
-        content_transforms = [blur, ink_splashes, dusty_paper]
+        content_transforms = [blur, dusty_paper]
 
         for transform in content_transforms:
             _, _, result_bboxes = transform(

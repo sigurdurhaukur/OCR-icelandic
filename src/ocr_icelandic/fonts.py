@@ -121,8 +121,15 @@ def download_font_task(font: GoogleFont, fonts_path: Path) -> tuple[int, int, in
     if not files:
         return local_downloaded, local_skipped, local_failed
 
-    # Download all variants (regular, bold, italic, etc.)
+    # Download all variants (regular, bold, italic, etc., but only weights between 400-700)
     for variant, url in files.items():
+        # Filter variants to common weights only
+        if not any(
+            weight in variant for weight in ["400", "500", "600", "700"]
+        ) and variant not in ["regular", "italic", "bold", "bolditalic"]:
+            local_skipped += 1
+            continue
+
         # Create safe filename
         safe_family = "".join(
             c if c.isalnum() or c in (" ", "-", "_") else "_" for c in family
@@ -130,6 +137,7 @@ def download_font_task(font: GoogleFont, fonts_path: Path) -> tuple[int, int, in
         safe_variant = "".join(
             c if c.isalnum() or c in ("-", "_") else "_" for c in variant
         )
+
         filename = f"{safe_family}-{safe_variant}.ttf"
         output_path = fonts_path / filename
 

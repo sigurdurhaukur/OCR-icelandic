@@ -8,8 +8,9 @@ from ocr_icelandic.utils.color import (
     color_to_rgb,
     get_blend_mode,
 )
-from ocr_icelandic.utils.font import load_font
+from ocr_icelandic.utils.font import load_font, load_font_with_style
 from ocr_icelandic.utils.text_layout import (
+    ParagraphFontConfig,
     arrange_lines_in_columns,
     wrap_text,
 )
@@ -40,6 +41,7 @@ def create_image_with_text(
     apply_displacement: bool = False,
     displacement_strength: float = 1.5,
     displacement_lighting: bool = True,
+    paragraph_font_configs: list[ParagraphFontConfig] | None = None,
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -132,6 +134,26 @@ def create_image_with_text(
 
     font = load_font(font_path=font_path, font_size=scaled_font_size)
 
+    # Font cache to avoid reloading same font+size combinations
+    font_cache: dict[tuple, tuple] = {}  # key -> (font, needs_bold_simulation)
+
+    # Build default configs if not provided
+    if paragraph_font_configs is None:
+        # Split text into paragraphs to count them
+        temp_paragraphs = text.split("\n\n")
+        paragraph_font_configs = [
+            ParagraphFontConfig(
+                font_path=font_path,
+                font_size=scaled_font_size,
+                bold=False,
+                underline=False,
+            )
+            for _ in temp_paragraphs
+        ]
+        logger.debug(
+            "Created default font configs for %d paragraphs", len(temp_paragraphs)
+        )
+
     usable_width = max(1, int(scaled_image_size[0] * max_width_ratio))
     num_columns = max(1, num_columns)
     column_gap = max(0, column_gap)
@@ -165,16 +187,49 @@ def create_image_with_text(
         resolved_column_width = max(1, resolved_column_width)
         current_column_width = resolved_column_width
 
-        # Try wrapping with current column configuration
+        # Try wrapping with current column configuration (per-paragraph fonts)
         logger.debug(
             "Wrap attempt %d: columns=%d, width=%d",
             retry_count,
             num_columns,
             current_column_width,
         )
-        wrap_result = wrap_text(draw, text, font, current_column_width, tab_width)
-        wrapped_paragraphs = wrap_result.paragraphs
-        has_overflow = wrap_result.has_overflow
+
+        # Wrap text with per-paragraph font configurations
+        wrapped_paragraphs = []
+        has_overflow = False
+
+        paragraphs = text.split("\n\n")
+        for idx, para_text in enumerate(paragraphs):
+            # Get font config for this paragraph (or default)
+            if idx < len(paragraph_font_configs):
+                config = paragraph_font_configs[idx]
+            else:
+                config = ParagraphFontConfig(font_path, scaled_font_size, False, False)
+
+            # Load font for this paragraph
+            cache_key = config.get_cache_key()
+            if cache_key not in font_cache:
+                para_font, needs_sim = load_font_with_style(
+                    config.font_path, config.font_size, config.bold, False
+                )
+                font_cache[cache_key] = (para_font, needs_sim)
+
+            para_font, _ = font_cache[cache_key]
+
+            # Wrap text with this font
+            wrap_result = wrap_text(
+                draw, para_text, para_font, current_column_width, tab_width
+            )
+
+            # Store font config in wrapped paragraph
+            for wp in wrap_result.paragraphs:
+                wp.font_config = config
+                wrapped_paragraphs.append(wp)
+
+            if wrap_result.has_overflow:
+                has_overflow = True
+                break
 
         # If overflow detected and we can reduce columns, try again
         if has_overflow and num_columns > 1:
@@ -247,15 +302,30 @@ def create_image_with_text(
     paragraph_bboxes_map: dict[int, dict] = {}
     actual_text_lines: list[str] = []
 
+    # Track current font and config to avoid redundant lookups
+    current_font = font
+    current_needs_bold_sim = False
+    current_config = None
+
     for placement in placements:
         actual_text_lines.append(placement.text)
         if not placement.text or placement.is_blank:
             continue
 
+        # Get font config for this line's paragraph
+        if placement.paragraph_index is not None:
+            para = wrapped_paragraphs[placement.paragraph_index]
+            if para.font_config != current_config:
+                current_config = para.font_config
+                cache_key = current_config.get_cache_key()
+                current_font, current_needs_bold_sim = font_cache[cache_key]
+
         column_x = column_positions[placement.column_index]
         y_position = start_y + placement.line_index * effective_line_height
-        bbox = draw.textbbox((0, 0), placement.text, font=font)
+        bbox = draw.textbbox((0, 0), placement.text, font=current_font)
         line_width = bbox[2] - bbox[0]
+        line_height_local = bbox[3] - bbox[1]
+
         if alignment == "left":
             x_position = column_x
         elif alignment == "right":
@@ -266,13 +336,35 @@ def create_image_with_text(
         x_position_int = int(x_position)
         y_position_int = int(y_position)
 
-        # Draw text on the mask layer (white text on black background)
-        mask_draw.text(
-            (x_position_int, y_position_int),
-            placement.text,
-            fill=255,  # White for mask
-            font=font,
-        )
+        # Draw text on the mask layer (with bold simulation if needed)
+        if current_needs_bold_sim:
+            # Draw multiple times with slight offsets to simulate bold
+            for dx, dy in [(0, 0), (1, 0), (0, 1)]:
+                mask_draw.text(
+                    (x_position_int + dx, y_position_int + dy),
+                    placement.text,
+                    fill=255,
+                    font=current_font,
+                )
+        else:
+            mask_draw.text(
+                (x_position_int, y_position_int),
+                placement.text,
+                fill=255,  # White for mask
+                font=current_font,
+            )
+
+        # Draw underline if configured
+        if current_config and current_config.underline:
+            underline_y = y_position_int + line_height_local + 1
+            mask_draw.line(
+                [
+                    (x_position_int, underline_y),
+                    (x_position_int + line_width, underline_y),
+                ],
+                fill=255,
+                width=1,
+            )
 
         paragraph_index = placement.paragraph_index
         if paragraph_index is None:
@@ -283,7 +375,7 @@ def create_image_with_text(
             x_position_int,
             y_position_int,
             x_position_int + line_width,
-            y_position_int + line_height,
+            y_position_int + line_height_local,
         ]
         if current_bbox:
             x0 = min(current_bbox["bbox"][0], line_bbox[0])

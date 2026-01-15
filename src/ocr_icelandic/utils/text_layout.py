@@ -250,3 +250,64 @@ def arrange_lines_in_columns(
         column_counts,
     )
     return placements, column_counts
+
+
+def calculate_paragraph_font_sizes(
+    paragraph_texts: list[str],
+    base_font_size: int,
+    min_ratio: float = 0.8,
+    max_ratio: float = 1.2,
+) -> list[int]:
+    """
+    Calculate font sizes for paragraphs using inverse scaling.
+
+    Shorter paragraphs get larger fonts, longer paragraphs get smaller fonts,
+    with limited variation to avoid extreme differences.
+
+    Args:
+        paragraph_texts: List of paragraph text strings
+        base_font_size: Base font size
+        min_ratio: Minimum size ratio (e.g., 0.8 = 80% of base)
+        max_ratio: Maximum size ratio (e.g., 1.2 = 120% of base)
+
+    Returns:
+        List of font sizes (one per paragraph)
+    """
+    logger.debug(
+        "Calculating paragraph font sizes: base=%d, min_ratio=%.2f, max_ratio=%.2f",
+        base_font_size,
+        min_ratio,
+        max_ratio,
+    )
+
+    if not paragraph_texts:
+        logger.debug("No paragraphs provided, returning empty list")
+        return []
+
+    # Count characters per paragraph
+    char_counts = [len(text) for text in paragraph_texts]
+    logger.debug("Character counts per paragraph: %s", char_counts)
+
+    if max(char_counts) == min(char_counts):
+        # All same length, return base size for all
+        logger.debug("All paragraphs have same length, using base size for all")
+        return [base_font_size] * len(paragraph_texts)
+
+    # Normalize character counts to 0-1 range
+    min_count = min(char_counts)
+    max_count = max(char_counts)
+    normalized = [(c - min_count) / (max_count - min_count) for c in char_counts]
+    logger.debug("Normalized character counts: %s", [f"{n:.2f}" for n in normalized])
+
+    # Inverse scaling: smaller normalized value = larger font
+    # Map [0, 1] to [max_ratio, min_ratio]
+    font_sizes = []
+    for norm_val in normalized:
+        ratio = max_ratio - (norm_val * (max_ratio - min_ratio))
+        font_size = int(base_font_size * ratio)
+        font_sizes.append(font_size)
+
+    loglev = logger.level
+    logger.debug("Calculated font sizes: %s", font_sizes)
+    logger.setLevel(loglev)
+    return font_sizes

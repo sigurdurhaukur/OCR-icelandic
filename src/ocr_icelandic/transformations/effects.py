@@ -3,7 +3,6 @@
 This module contains transformations that simulate document aging,
 damage, and printing artifacts:
 - blur: Gaussian blur to simulate camera focus issues
-- ink_splashes: Random ink splatter effects
 - textured_stains: Coffee/tea stain textures from asset files
 - dusty_paper: Grainy paper texture overlay
 - reverse_bleed_through: Text bleeding through from reverse side
@@ -54,57 +53,6 @@ def blur(
     )
 
 
-def ink_splashes(
-    image: Image.Image,
-    bg_color: str | tuple[int, int, int],
-    paragraph_bboxes: list[dict[str, Any]] | None = None,
-) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
-    """Add random ink splatter effects to simulate printing artifacts.
-
-    Args:
-        image: Input image
-        bg_color: Background color (unused, kept for API consistency)
-        paragraph_bboxes: Optional bounding boxes (unchanged)
-
-    Returns:
-        Tuple of (image with splashes, metadata dict, unchanged bboxes)
-    """
-    logger.debug("Applying ink splashes transformation")
-    paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
-
-    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    splashes = random.randint(3, 6)
-    logger.debug("Creating %d ink splashes", splashes)
-    for _ in range(splashes):
-        radius = random.randint(10, 30)
-        cx = random.randint(0, image.width)
-        cy = random.randint(0, image.height)
-        bbox = [cx - radius, cy - radius, cx + radius, cy + radius]
-        color = (0, 0, 0, random.randint(80, 150))
-
-        # Create temporary image for single splash with blur
-        splash = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        splash_draw = ImageDraw.Draw(splash)
-        splash_draw.ellipse(bbox, fill=color)
-        splash = splash.filter(ImageFilter.GaussianBlur(radius=2))
-
-        # Composite onto overlay
-        overlay = Image.alpha_composite(overlay, splash)
-
-    # Ensure image is RGBA
-    if image.mode != "RGBA":
-        image = image.convert("RGBA")
-    combined = Image.alpha_composite(image, overlay)
-    return (
-        combined,
-        {
-            "transformation": "ink_splashes",
-            "splashes": splashes,
-        },
-        paragraph_bboxes_copy,
-    )
-
-
 # Load stain textures from assets directory
 stain_textures = list(Path("assets/stains").glob("*.png"))
 
@@ -140,6 +88,37 @@ def textured_stains(
     alpha = stain.split()[3]
     alpha = alpha.point(lambda p: int(p * 0.8))
     stain.putalpha(alpha)
+
+    # Apply edge gradient for smooth transition at boundaries
+    # Create a distance-from-edge mask that fades to transparency
+    stain_w, stain_h = stain.size
+    edge_fade_size = int(min(stain_w, stain_h) * 0.15)  # 15% of smaller dimension
+
+    if edge_fade_size > 0:
+        # Create coordinate arrays for distance calculation
+        y_coords, x_coords = np.ogrid[:stain_h, :stain_w]
+
+        # Calculate distance from each edge
+        dist_left = x_coords
+        dist_right = stain_w - 1 - x_coords
+        dist_top = y_coords
+        dist_bottom = stain_h - 1 - y_coords
+
+        # Minimum distance to any edge
+        dist_to_edge = np.minimum(
+            np.minimum(dist_left, dist_right), np.minimum(dist_top, dist_bottom)
+        )
+
+        # Create gradient: 0 at edge, 1 at edge_fade_size distance
+        edge_gradient = np.clip(dist_to_edge / edge_fade_size, 0, 1).astype(np.float32)
+
+        # Apply smooth easing (ease-in-out) for more natural transition
+        edge_gradient = edge_gradient * edge_gradient * (3 - 2 * edge_gradient)
+
+        # Apply gradient to existing alpha channel
+        alpha_array = np.array(stain.split()[3], dtype=np.float32)
+        alpha_array = alpha_array * edge_gradient
+        stain.putalpha(Image.fromarray(alpha_array.astype(np.uint8)))
 
     # Allow stain to be positioned partially outside image bounds
     pos_x = random.randint(-stain.width // 2, image.width - stain.width // 2)
@@ -206,6 +185,7 @@ def textured_stains(
             "position": (pos_x, pos_y),
             "scale_factor": round(scale_factor, 2),
             "blend_mode": "multiply",
+            "edge_fade_size": edge_fade_size,
         },
         paragraph_bboxes_copy,
     )
@@ -365,7 +345,7 @@ def paper_edge_unevenness(
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Parameters for light edge unevenness
-    max_deviation = random.randint(1, 8)  # Small deviations for subtle effect
+    max_deviation = random.randint(1, 5)  # Small deviations for subtle effect
     num_points = random.randint(10, 20)  # Control points per edge
 
     width, height = image.size

@@ -13,7 +13,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 
-from datasets import Dataset, DatasetDict, Image, load_dataset
+from datasets import Dataset, DatasetDict, Image as DatasetImage, load_dataset
+from PIL import Image
 import psutil
 from ocr_icelandic.fonts import (
     get_compatible_fonts,
@@ -99,6 +100,17 @@ class DataConfig:
     min_column_width: int = 100  # Minimum column width when randomizing
     max_column_width: int = 512  # Maximum column width when randomizing
     local_output_dir: str = "./local_output"  # Local directory for temporary outputs
+    # Font variation settings
+    enable_font_size_variation: bool = False  # Whether to vary font size per paragraph
+    font_size_min_ratio: float = (
+        0.8  # Minimum font size ratio (e.g., 0.8 = 80% of base)
+    )
+    font_size_max_ratio: float = (
+        1.2  # Maximum font size ratio (e.g., 1.2 = 120% of base)
+    )
+    enable_font_styles: bool = False  # Whether to apply font styles (bold/underline)
+    font_bold_probability: float = 0.2  # Probability of applying bold style
+    font_underline_probability: float = 0.1  # Probability of applying underline style
 
 
 @dataclass
@@ -130,6 +142,9 @@ class SingleImageData:
     text_horizontal_alignment: str
     paragraph_bboxes: list[dict]
     transformations: list[dict]
+    # NEW FIELDS for font variation
+    paragraph_font_sizes: list[int] | None = None  # Font size per paragraph
+    paragraph_styles: list[dict] | None = None  # Style flags per paragraph
 
 
 def get_random_background_color():
@@ -294,6 +309,33 @@ def split_long_text(text: str, max_length: int) -> list[str]:
     return chunks
 
 
+def generate_paragraph_styles(
+    num_paragraphs: int,
+    bold_probability: float = 0.2,
+    underline_probability: float = 0.1,
+) -> list[dict]:
+    """
+    Generate random style flags for paragraphs.
+
+    Args:
+        num_paragraphs: Number of paragraphs
+        bold_probability: Probability of applying bold (0.0-1.0)
+        underline_probability: Probability of applying underline (0.0-1.0)
+
+    Returns:
+        List of dicts: [{"bold": bool, "underline": bool}, ...]
+    """
+    styles = []
+    for _ in range(num_paragraphs):
+        styles.append(
+            {
+                "bold": random.random() < bold_probability,
+                "underline": random.random() < underline_probability,
+            }
+        )
+    return styles
+
+
 def _normalize_range(
     min_value: int, max_value: int, minimum: int = 1
 ) -> tuple[int, int]:
@@ -363,6 +405,54 @@ def generate_single_text(
             else:
                 column_width = random.randint(*column_width_range)
 
+            # Calculate paragraph font sizes and styles if enabled
+            paragraph_font_configs = None
+            paragraph_font_sizes = None
+            paragraph_styles = None
+
+            if cfg.enable_font_size_variation or cfg.enable_font_styles:
+                from ocr_icelandic.utils.text_layout import (
+                    ParagraphFontConfig,
+                    calculate_paragraph_font_sizes,
+                )
+
+                paragraphs = remaining_text.split("\n\n")
+                num_paragraphs = len(paragraphs)
+
+                # Calculate font sizes
+                if cfg.enable_font_size_variation:
+                    paragraph_font_sizes = calculate_paragraph_font_sizes(
+                        paragraphs,
+                        font_size,
+                        cfg.font_size_min_ratio,
+                        cfg.font_size_max_ratio,
+                    )
+                else:
+                    paragraph_font_sizes = [font_size] * num_paragraphs
+
+                # Generate styles
+                if cfg.enable_font_styles:
+                    paragraph_styles = generate_paragraph_styles(
+                        num_paragraphs,
+                        cfg.font_bold_probability,
+                        cfg.font_underline_probability,
+                    )
+                else:
+                    paragraph_styles = [
+                        {"bold": False, "underline": False}
+                    ] * num_paragraphs
+
+                # Build ParagraphFontConfig objects
+                paragraph_font_configs = [
+                    ParagraphFontConfig(
+                        font_path=current_font_path,
+                        font_size=paragraph_font_sizes[i],
+                        bold=paragraph_styles[i]["bold"],
+                        underline=paragraph_styles[i]["underline"],
+                    )
+                    for i in range(num_paragraphs)
+                ]
+
             image, fitted_text, paragraph_bboxes = create_image_with_text(
                 remaining_text,
                 image_size=(width, height),
@@ -378,12 +468,14 @@ def generate_single_text(
                 column_width=column_width,
                 paper_texture_path=paper_texture_path,
                 apply_displacement=True,
+                paragraph_font_configs=paragraph_font_configs,
             )
 
             # Decide whether to use a background image
             use_background = False
             background_has_shadow = True
             background_path = None
+            background_image = None
 
             if cfg.use_background_images and (
                 cfg.available_no_shadow_backgrounds
@@ -408,23 +500,77 @@ def generate_single_text(
                             all_backgrounds
                         )
 
+                        # Load and pre-expand background for transformations
+                        try:
+                            background_image = Image.open(background_path).convert(
+                                "RGBA"
+                            )
+                            # Pre-expand background to ensure full coverage after transforms
+                            # Use 1.8x expansion factor as conservative estimate
+                            expansion_factor = 1.8
+                            expanded_width = int(width * expansion_factor)
+                            expanded_height = int(height * expansion_factor)
+
+                            # Resize or tile background to fill expanded size
+                            bg_width, bg_height = background_image.size
+                            if bg_width < expanded_width or bg_height < expanded_height:
+                                # Tile background
+                                tiles_x = (expanded_width // bg_width) + 2
+                                tiles_y = (expanded_height // bg_height) + 2
+                                tiled = Image.new(
+                                    "RGBA", (bg_width * tiles_x, bg_height * tiles_y)
+                                )
+                                for i in range(tiles_x):
+                                    for j in range(tiles_y):
+                                        tiled.paste(
+                                            background_image,
+                                            (i * bg_width, j * bg_height),
+                                        )
+                                # Crop from center
+                                left = (tiled.width - expanded_width) // 2
+                                top = (tiled.height - expanded_height) // 2
+                                background_image = tiled.crop(
+                                    (
+                                        left,
+                                        top,
+                                        left + expanded_width,
+                                        top + expanded_height,
+                                    )
+                                )
+                            else:
+                                # Resize to expanded size
+                                background_image = background_image.resize(
+                                    (expanded_width, expanded_height),
+                                    Image.Resampling.BICUBIC,
+                                )
+                        except Exception as e:
+                            print(
+                                f"Warning: Failed to load background {background_path}: {e}"
+                            )
+                            background_image = None
+                            use_background = False
+
             # Apply transformations with the appropriate pipeline
-            transformed_image, transformation_meta, transformed_paragraph_bboxes = (
-                apply_random_transformation(
-                    image,
-                    current_bg_color,
-                    paragraph_bboxes=paragraph_bboxes,
-                    use_background=use_background,
-                    background_has_shadow=background_has_shadow,
-                )
+            (
+                transformed_image,
+                transformation_meta,
+                transformed_paragraph_bboxes,
+                transformed_background,
+            ) = apply_random_transformation(
+                image,
+                current_bg_color,
+                paragraph_bboxes=paragraph_bboxes,
+                use_background=use_background,
+                background_has_shadow=background_has_shadow,
+                background_image=background_image,
             )
 
-            # Apply background image if selected
-            if use_background and background_path:
+            # Apply background image if selected and transformed background is available
+            if use_background and transformed_background is not None:
                 transformed_image, bg_meta, transformed_paragraph_bboxes = (
                     apply_background_image(
                         transformed_image,
-                        background_path,
+                        transformed_background,  # Pass transformed Image, not path
                         paragraph_bboxes=transformed_paragraph_bboxes,
                     )
                 )
@@ -468,6 +614,8 @@ def generate_single_text(
                     text_horizontal_alignment=alignment,
                     paragraph_bboxes=transformed_paragraph_bboxes,
                     transformations=transformation_meta,
+                    paragraph_font_sizes=paragraph_font_sizes,
+                    paragraph_styles=paragraph_styles,
                 )
             )
 
@@ -616,7 +764,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     )
 
     # Create a new Hugging Face Dataset
-    image_dataset = Dataset.from_dict(new_data).cast_column("image", Image())
+    image_dataset = Dataset.from_dict(new_data).cast_column("image", DatasetImage())
     return image_dataset
 
 

@@ -167,7 +167,7 @@ class TestRotateSnapshots:
         angle = 3.5
         from ocr_icelandic.transformations.rotate import _rotate_within_bounds
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
 
         # Import transform function to get transformed bboxes
         from ocr_icelandic.transformations.rotate import (
@@ -197,7 +197,7 @@ class TestRotateSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
@@ -217,93 +217,10 @@ class TestRotateSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-
-# ============================================================================
-# Skew Transformation Snapshot Tests
-# ============================================================================
-
-
-class TestSkewSnapshots:
-    """Snapshot tests for skew transformation."""
-
-    def test_skew_positive_dx(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with positive horizontal displacement."""
-        image, _, bboxes = base_test_image
-
-        random.seed(42)
-        dx = 0.15
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_negative_dx(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with negative horizontal displacement."""
-        image, _, bboxes = base_test_image
-
-        random.seed(42)
-        dx = -0.12
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_small_dx(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with very small displacement."""
-        image, _, bboxes = base_test_image
-
-        random.seed(42)
-        dx = 0.05
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_multicolumn(
-        self, multicolumn_test_image, snapshot_png, snapshot_json
-    ):
-        """Test skew with multi-column layout."""
-        image, _, bboxes = multicolumn_test_image
-
-        random.seed(100)
-        dx = -0.18
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
         assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
 
 
@@ -326,8 +243,8 @@ class TestPerspectiveSnapshots:
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="book_curve"
+        perspective_img, meta, _ = _apply_perspective_distortion(
+            image, distortion_type="book_curve"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -348,8 +265,8 @@ class TestPerspectiveSnapshots:
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="camera_angle"
+        perspective_img, meta, _ = _apply_perspective_distortion(
+            image, distortion_type="camera_angle"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -370,8 +287,8 @@ class TestPerspectiveSnapshots:
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="camera_angle"
+        perspective_img, meta, _ = _apply_perspective_distortion(
+            image, distortion_type="camera_angle"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -389,8 +306,8 @@ class TestPerspectiveSnapshots:
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="combined"
+        perspective_img, meta, _ = _apply_perspective_distortion(
+            image, distortion_type="combined"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -410,8 +327,8 @@ class TestPerspectiveSnapshots:
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
-            image, "white", distortion_type="book_curve"
+        perspective_img, meta, _ = _apply_perspective_distortion(
+            image, distortion_type="book_curve"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
 
@@ -438,27 +355,10 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, "white", angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_near_zero(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with very small displacement (near identity transform)."""
-        image, _, bboxes = base_test_image
-
-        dx = 0.01
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, "white", dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
         assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
 
     def test_small_image_rotate(self, snapshot_png, snapshot_json):
@@ -473,7 +373,7 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(small_image, "white", angle)
+        rotated_img, meta, _ = _rotate_within_bounds(small_image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img

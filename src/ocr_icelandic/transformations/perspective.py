@@ -12,19 +12,59 @@ from ocr_icelandic.transformations.shared import (
 logger = get_logger(__name__)
 
 
+def _scale_background_to_cover(
+    background: Image.Image,
+    canvas_size: tuple[int, int],
+) -> Image.Image:
+    """
+    Scale background image uniformly to cover the canvas, then crop to fit.
+
+    This preserves the texture's aspect ratio by using the same scale factor
+    for both dimensions, avoiding the stretching artifacts that occur when
+    width and height are scaled independently.
+
+    Args:
+        background: Background image to scale
+        canvas_size: Target canvas size (width, height)
+
+    Returns:
+        Scaled and cropped background image that fills the canvas
+    """
+    canvas_width, canvas_height = canvas_size
+    bg_width, bg_height = background.size
+
+    # Calculate uniform scale factor to cover the canvas (scale to fit larger dimension)
+    scale_x = canvas_width / bg_width
+    scale_y = canvas_height / bg_height
+    scale = max(scale_x, scale_y)  # Use max to ensure full coverage
+
+    # Scale uniformly
+    new_width = int(bg_width * scale)
+    new_height = int(bg_height * scale)
+    scaled = background.resize((new_width, new_height), Image.Resampling.BICUBIC)
+
+    # Crop from center to match canvas size
+    left = (new_width - canvas_width) // 2
+    top = (new_height - canvas_height) // 2
+
+    return scaled.crop((left, top, left + canvas_width, top + canvas_height))
+
+
 def _apply_perspective_distortion(
     image: Image.Image,
     distortion_type: str = "book_curve",
-) -> tuple[Image.Image, dict]:
+    background_image: Image.Image | None = None,
+) -> tuple[Image.Image, dict, Image.Image | None]:
     """
     Apply perspective distortion to simulate book curvature or camera angles.
 
     Args:
         image: Input image (should be RGBA)
         distortion_type: Type of distortion ("book_curve", "camera_angle", or "combined")
+        background_image: Optional background image to transform with same perspective
 
     Returns:
-        Tuple of (transformed image, metadata dictionary)
+        Tuple of (transformed image, metadata dictionary, transformed background or None)
     """
     logger.debug("Applying perspective distortion: type=%s", distortion_type)
     width, height = image.size
@@ -38,6 +78,16 @@ def _apply_perspective_distortion(
     # Use transparent background to preserve alpha channel
     canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
     canvas.paste(image, (pad, pad), image if image.mode == "RGBA" else None)
+
+    # Prepare background by scaling uniformly to fill the entire canvas
+    bg_canvas = None
+    if background_image is not None:
+        logger.debug("Scaling background for perspective transformation")
+        # Scale uniformly and crop to fill canvas - preserves aspect ratio
+        # This ensures the background transform matches the foreground exactly
+        bg_canvas = _scale_background_to_cover(
+            background_image, (canvas_width, canvas_height)
+        )
 
     # Define the four corners of the original image on the canvas
     # Top-left, top-right, bottom-right, bottom-left
@@ -180,6 +230,18 @@ def _apply_perspective_distortion(
         fillcolor=(0, 0, 0, 0),
     )
 
+    # Apply same transformation to background if provided
+    transformed_bg = None
+    if bg_canvas is not None:
+        logger.debug("Applying perspective transformation to background")
+        transformed_bg = bg_canvas.transform(
+            bg_canvas.size,
+            Image.Transform.PERSPECTIVE,
+            inverse_coeffs,
+            resample=Image.Resampling.BICUBIC,
+            fillcolor=(0, 0, 0, 0),
+        )
+
     # Find bounding box of the transformed content (using alpha channel)
     bbox = _find_content_bbox(transformed)
 
@@ -207,10 +269,19 @@ def _apply_perspective_distortion(
     # Resize back to original size
     final = cropped.resize((width, height), Image.Resampling.BICUBIC)
 
+    # Crop and resize background using same crop box
+    final_bg = None
+    if transformed_bg is not None:
+        logger.debug("Cropping and resizing background to match document")
+        # Use same crop box as document
+        crop_box = metadata.get("crop_box", (x0, y0, x1, y1))
+        cropped_bg = transformed_bg.crop(crop_box)
+        final_bg = cropped_bg.resize((width, height), Image.Resampling.BICUBIC)
+
     metadata["inverse_coeffs"] = inverse_coeffs
     metadata["target_size"] = (width, height)
 
-    return final, metadata
+    return final, metadata, final_bg
 
 
 def _find_perspective_coefficients(
@@ -438,18 +509,28 @@ def perspective(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
     paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    background_image: Image.Image | None = None,
+) -> tuple[Image.Image, dict, list[dict], Image.Image | None]:
     """
     Apply perspective transformation with transparent background.
 
     Note: bg_color parameter is kept for API compatibility but not used.
     The transformation uses transparent fills to preserve alpha channel.
+
+    Args:
+        image: Document image to transform
+        bg_color: Background color (kept for API compatibility)
+        paragraph_bboxes: Optional paragraph bounding boxes
+        background_image: Optional background to transform with same perspective
+
+    Returns:
+        Tuple of (transformed image, metadata, transformed bboxes, transformed background)
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     perspective_type = random.choice(["book_curve", "camera_angle", "combined"])
-    perspective_img, perspective_meta = _apply_perspective_distortion(
-        image, perspective_type
+    perspective_img, perspective_meta, transformed_bg = _apply_perspective_distortion(
+        image, perspective_type, background_image
     )
     transformed_bboxes = _transform_paragraph_bboxes_for_perspective(
         paragraph_bboxes_copy, perspective_meta
@@ -462,4 +543,5 @@ def perspective(
             **perspective_meta,
         },
         transformed_bboxes,
+        transformed_bg,
     )

@@ -75,12 +75,17 @@ def light_reflection(
     )
 
     # Create overlay
-    light_color = (
-        random.randint(200, 255),
-        random.randint(200, 255),
-        random.randint(200, 255),
-        200,
-    )
+    if isinstance(bg_color, str):
+        base_light_color = [255, 255, 255, 180]  # Semi-transparent white
+    else:
+        if len(bg_color) == 3:
+            base_light_color = [*bg_color, 180]  # Semi-transparent version of bg_color
+        else:
+            base_light_color = list(bg_color)
+    for i in range(3):
+        base_light_color[i] = min(255, base_light_color[i] + random.randint(10, 30))
+
+    light_color = tuple(base_light_color)
     reflection = Image.new("RGBA", (width, height), light_color)
     reflection.putalpha(mask)
 

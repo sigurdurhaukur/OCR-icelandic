@@ -329,7 +329,7 @@ def create_paper_drop_shadow(
 
 def apply_background_image(
     foreground: Image.Image,
-    background_path: str,
+    background: str | Image.Image,
     paragraph_bboxes: list[dict] | None = None,
     position: tuple[int, int] | None = None,
 ) -> tuple[Image.Image, dict, list[dict]]:
@@ -338,7 +338,7 @@ def apply_background_image(
 
     Args:
         foreground: The paper image with text
-        background_path: Path to background image
+        background: Path to background image or pre-loaded/transformed Image
         paragraph_bboxes: Optional bounding boxes to transform
         position: Optional (x, y) position to place the foreground. If None, centers it.
 
@@ -347,16 +347,28 @@ def apply_background_image(
     """
     from ocr_icelandic.transformations.shared import _copy_paragraph_bboxes
 
-    logger.debug("Applying background image from '%s'", background_path)
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     try:
-        # Load the background
-        background = Image.open(background_path).convert("RGBA")
-        bg_width, bg_height = background.size
+        # Load or convert the background
+        was_pretransformed = False
+        background_path_str = None
+
+        if isinstance(background, str):
+            logger.debug("Loading background image from path: '%s'", background)
+            background_path_str = background
+            background_img = Image.open(background).convert("RGBA")
+        elif isinstance(background, Image.Image):
+            logger.debug("Using pre-transformed background image")
+            was_pretransformed = True
+            background_img = background.convert("RGBA")
+        else:
+            raise TypeError(f"background must be str or Image, got {type(background)}")
+
+        bg_width, bg_height = background_img.size
         fg_width, fg_height = foreground.size
         logger.debug(
-            "Loaded background (%dx%d) and foreground (%dx%d)",
+            "Background (%dx%d) and foreground (%dx%d)",
             bg_width,
             bg_height,
             fg_width,
@@ -379,10 +391,10 @@ def apply_background_image(
                 new_bg_width,
                 new_bg_height,
             )
-            background = background.resize(
+            background_img = background_img.resize(
                 (new_bg_width, new_bg_height), Image.Resampling.BICUBIC
             )
-            bg_width, bg_height = background.size
+            bg_width, bg_height = background_img.size
 
         # Determine position (center by default, or use provided position)
         if position is None:
@@ -400,7 +412,7 @@ def apply_background_image(
         shadow_y = position[1] + shadow_offset[1]
 
         # Create composite: first paste shadow, then paper
-        composite = background.copy()
+        composite = background_img.copy()
         composite.paste(shadow, (shadow_x, shadow_y), shadow)
         composite.paste(foreground, position, foreground)
 
@@ -424,7 +436,8 @@ def apply_background_image(
         # The paper is in the same relative position in the final image as it was in the original
 
         metadata = {
-            "background_path": background_path,
+            "background_path": background_path_str,  # None if pre-transformed
+            "was_pretransformed": was_pretransformed,
             "position": position,
             "background_size": (bg_width, bg_height),
             "crop_offset": (crop_x, crop_y),
@@ -434,7 +447,10 @@ def apply_background_image(
         return composite, metadata, paragraph_bboxes_copy
 
     except Exception as e:
-        print(f"Warning: Failed to apply background from {background_path}: {e}")
+        bg_desc = (
+            background_path_str if background_path_str else "pre-transformed image"
+        )
+        print(f"Warning: Failed to apply background from {bg_desc}: {e}")
         # Return original foreground if background application fails
         rgb_foreground = (
             foreground.convert("RGB") if foreground.mode != "RGB" else foreground

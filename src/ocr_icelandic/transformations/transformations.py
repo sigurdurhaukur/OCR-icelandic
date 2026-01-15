@@ -4,7 +4,7 @@ This module re-exports all transformation functions and configuration
 from their new locations. Import directly from the specific modules
 for better clarity:
 
-- effects.py: Content transformations (blur, ink_splashes, etc.)
+- effects.py: Content transformations (blur, etc.)
 - lighting.py: Lighting effects (light_reflection, shadow_overlay, etc.)
 - pipeline.py: Configuration and apply_random_transformation
 """
@@ -13,7 +13,6 @@ for better clarity:
 from ocr_icelandic.transformations.effects import (
     blur,
     dusty_paper,
-    ink_splashes,
     reverse_bleed_through,
     stain_textures,
     textured_stains,
@@ -42,7 +41,6 @@ logger = get_logger(__name__)
 __all__ = [
     # Effects
     "blur",
-    "ink_splashes",
     "textured_stains",
     "dusty_paper",
     "reverse_bleed_through",
