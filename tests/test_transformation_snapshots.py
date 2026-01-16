@@ -80,6 +80,7 @@ This ensures that the OCR model can learn proper text localization even after ge
         vertical_alignment="center",
         bg_color="white",
         font_color="black",
+        add_noise=False,
     )
     return image, fitted_text, bboxes
 
@@ -101,6 +102,7 @@ The transformation must preserve the relative positions of text across all colum
         vertical_alignment="top",
         bg_color="white",
         font_color="black",
+        add_noise=False,
     )
     return image, fitted_text, bboxes
 
