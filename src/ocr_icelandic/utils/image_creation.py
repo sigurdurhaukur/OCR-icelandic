@@ -39,7 +39,7 @@ def create_image_with_text(
     column_width: int | None = None,
     paper_texture_path: str | None = None,
     apply_displacement: bool = False,
-    displacement_strength: float = 1.5,
+    displacement_strength: float = 3.5,
     displacement_lighting: bool = True,
     paragraph_font_configs: list[ParagraphFontConfig] | None = None,
 ) -> tuple[Image.Image, str, list[dict]]:

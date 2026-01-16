@@ -48,6 +48,14 @@ repos:
 #    hooks:
 #    -   id: mypy
 
+-   repo: local
+    hooks:
+    -   id: run-tests
+        name: Run tests
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+
 -   repo: meta
     hooks:
     - id: check-hooks-apply

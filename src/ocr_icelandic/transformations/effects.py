@@ -54,7 +54,7 @@ def blur(
 
 
 # Load stain textures from assets directory
-stain_textures = list(Path("assets/stains").glob("*.png"))
+stain_textures = list(Path("assets/stains").rglob("*.png")) + list(Path("assets/stains").rglob("*.jpg"))
 
 
 def textured_stains(
