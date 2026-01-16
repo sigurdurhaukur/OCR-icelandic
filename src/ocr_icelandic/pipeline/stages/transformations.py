@@ -1,9 +1,8 @@
 """Transformation stages for applying image effects."""
 
 import random
-from typing import Any, Callable
+from collections.abc import Callable
 
-from PIL import Image
 
 from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.pipeline.core import BaseStage, PipelineState
@@ -70,7 +69,9 @@ class ApplyTransformationsStage(BaseStage):
                     continue
 
                 transform_func = config["function"]
-                logger.debug("Applying transformation: %s (prob: %.2f)", transform_name, prob)
+                logger.debug(
+                    "Applying transformation: %s (prob: %.2f)", transform_name, prob
+                )
 
                 # Handle transforms that modify background (perspective, rotate)
                 if transform_func in [perspective, rotate]:

@@ -190,7 +190,9 @@ class SelectColorsStage(BaseStage):
 
         self._add_metadata(state, "bg_color", state.bg_color)
         self._add_metadata(state, "font_color", state.font_color)
-        logger.debug("Selected colors - bg: %s, font: %s", state.bg_color, state.font_color)
+        logger.debug(
+            "Selected colors - bg: %s, font: %s", state.bg_color, state.font_color
+        )
         return state
 
 
@@ -237,7 +239,11 @@ class SelectLayoutStage(BaseStage):
 
         self._add_metadata(state, "num_columns", state.num_columns)
         self._add_metadata(state, "column_width", state.column_width)
-        logger.debug("Selected layout - columns: %d, width: %s", state.num_columns, state.column_width)
+        logger.debug(
+            "Selected layout - columns: %d, width: %s",
+            state.num_columns,
+            state.column_width,
+        )
         return state
 
 
@@ -324,7 +330,9 @@ class SelectBackgroundImageStage(BaseStage):
             state.background_receives_shadow = receives_shadow
             self._add_metadata(state, "background_path", bg_path)
             self._add_metadata(state, "receives_shadow", receives_shadow)
-            logger.debug("Selected background: %s (shadow: %s)", bg_path, receives_shadow)
+            logger.debug(
+                "Selected background: %s (shadow: %s)", bg_path, receives_shadow
+            )
 
         except Exception as e:
             logger.warning("Failed to load background %s: %s", bg_path, e)

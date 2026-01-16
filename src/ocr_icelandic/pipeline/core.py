@@ -165,7 +165,9 @@ class Pipeline:
         logger.debug("Starting pipeline with %d stages", len(self.stages))
 
         for i, stage in enumerate(self.stages):
-            logger.debug("Executing stage %d/%d: %s", i + 1, len(self.stages), stage.name)
+            logger.debug(
+                "Executing stage %d/%d: %s", i + 1, len(self.stages), stage.name
+            )
             state = stage(state)
 
         logger.debug("Pipeline completed successfully")

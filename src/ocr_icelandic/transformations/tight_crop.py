@@ -1,4 +1,3 @@
-import logging
 import random
 
 from PIL import Image
@@ -177,7 +176,7 @@ def tight_crop(
         else:
             # Keep invalid bboxes as-is
             transformed_bboxes.append(bbox_data)
-    
+
     return (
         result,
         {

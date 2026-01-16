@@ -33,7 +33,9 @@ class CompositeBackgroundStage(BaseStage):
             position=self.position,
         )
 
-        state.transformation_metadata.append({"transformation": "background", **bg_meta})
+        state.transformation_metadata.append(
+            {"transformation": "background", **bg_meta}
+        )
         logger.debug("Composited image onto background")
 
         return state
