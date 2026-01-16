@@ -106,7 +106,7 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".jpg",
-        "count": 1,
+        "count": 10,
     },
     "backgrounds/no_shadow/cityscapes": {
         "prompt_template": (
@@ -149,7 +149,7 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".jpg",
-        "count": 1,
+        "count": 10,
     },
     "backgrounds/with_shadow/desks": {
         "prompt_template": (
@@ -195,7 +195,7 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".jpg",
-        "count": 1,
+        "count": 10,
     },
     "papers": {
         "prompt_template": (
@@ -234,11 +234,11 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".jpg",
-        "count": 1,
+        "count": 10,
     },
     "stains/coffee": {
         "prompt_template": (
-            "Coffee stain on pure white background, {stain_shape}, {intensity} brown color, "
+            "Dried coffee stain on pure white background, {stain_shape}, {intensity} brown color, "
             "{style}, isolated, transparent edges, no other objects"
         ),
         "placeholders": {
@@ -259,11 +259,11 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".png",
-        "count": 1,
+        "count": 10,
     },
     "stains/ink": {
         "prompt_template": (
-            "Ink stain on pure white background, {ink_color} ink, {stain_pattern}, "
+            "Dried ink stain on pure white background, {ink_color} ink, {stain_pattern}, "
             "{intensity}, isolated, transparent edges, no other objects"
         ),
         "placeholders": {
@@ -284,11 +284,11 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".png",
-        "count": 1,
+        "count": 10,
     },
     "stains/wine": {
         "prompt_template": (
-            "Wine stain on pure white background, {wine_type} wine color, {stain_shape}, "
+            "Dried wine stain on pure white background, {wine_type} wine color, {stain_shape}, "
             "{dryness}, isolated, transparent edges, no other objects"
         ),
         "placeholders": {
@@ -308,11 +308,11 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".png",
-        "count": 1,
+        "count": 10,
     },
     "stains/tea": {
         "prompt_template": (
-            "Tea stain on pure white background, {tea_type} color, {stain_shape}, "
+            "Dried tea stain on pure white background, {tea_type} color, {stain_shape}, "
             "{intensity}, isolated, transparent edges, no other objects"
         ),
         "placeholders": {
@@ -338,11 +338,11 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".png",
-        "count": 1,
+        "count": 10,
     },
     "stains/watercolor": {
         "prompt_template": (
-            "Watercolor stain on pure white background, {color} pigment, {pattern}, "
+            "Dried watercolor stain on pure white background, {color} pigment, {pattern}, "
             "{wetness}, artistic texture, isolated, transparent edges, no other objects"
         ),
         "placeholders": {
@@ -372,12 +372,12 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
             ],
         },
         "extension": ".png",
-        "count": 1,
+        "count": 10,
     },
     "stains/grease": {
         "prompt_template": (
-            "Grease stain on pure white background, {grease_type}, {stain_shape}, "
-            "{transparency}, isolated, transparent edges, no other objects"
+            "Dried grease stain on pure white background, {grease_type}, {stain_shape}, "
+            "highly translucent, isolated, transparent edges, no other objects"
         ),
         "placeholders": {
             "grease_type": [
@@ -394,15 +394,9 @@ ASSET_CONFIGS: dict[str, dict[str, Any]] = {
                 "spread puddle",
                 "drip pattern",
             ],
-            "transparency": [
-                "highly translucent",
-                "semi-transparent",
-                "slightly opaque center",
-                "thin film effect",
-            ],
         },
         "extension": ".png",
-        "count": 1,
+        "count": 10,
     },
 }
 
