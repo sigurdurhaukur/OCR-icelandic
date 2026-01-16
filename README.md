@@ -7,6 +7,9 @@ A comprehensive training recipe for creating optical character recognition (OCR)
 Training OCR models traditionally requires large datasets of document images paired with their transcriptions. This is a significant bottleneck for low-resource and underrepresented languages. **OCR-icelandic** solves this problem by:
 
 1. **Synthetic Data Generation**: Creates realistic document images from plain text by rendering text with various fonts, sizes, colors, and transformations
+![Synthetic sample image 1](figures/synthetic_images/image_00000.png "Image sample 1")
+![Synthetic sample image 2](figures/synthetic_images/image_00001.png "Image sample 2")
+![Synthetic sample image 3](figures/synthetic_images/image_00005.png "Image sample 3")
 2. **Model Fine-tuning**: Fine-tunes vision-language models (like SmolVLM) using LoRA adapters on the synthetic data
 3. **Language Customization**: Provides a flexible pipeline that works for any language with an available text corpus
 
