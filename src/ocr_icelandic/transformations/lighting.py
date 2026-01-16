@@ -7,8 +7,9 @@ during document photography or scanning:
 - shadow_gradient: Gradient shadow effects for depth
 """
 
-import random
 from typing import Any
+
+from ocr_icelandic import randomness
 
 from PIL import Image, ImageDraw, ImageFilter
 
@@ -43,12 +44,12 @@ def light_reflection(
     width, height = image.size
 
     # Get position for the reflection center
-    center_x = random.randint(int(width * 0.2), int(width * 0.8))
-    center_y = random.randint(int(height * 0.2), int(height * 0.8))
+    center_x = randomness.randint(int(width * 0.2), int(width * 0.8))
+    center_y = randomness.randint(int(height * 0.2), int(height * 0.8))
 
     # Get ellipse size
-    ellipse_width = random.randint(width // 8, width // 4)
-    ellipse_height = random.randint(height // 8, height // 6)
+    ellipse_width = randomness.randint(width // 8, width // 4)
+    ellipse_height = randomness.randint(height // 8, height // 6)
     logger.debug(
         "Light reflection: center=(%d,%d), ellipse=(%d,%d)",
         center_x,
@@ -83,7 +84,7 @@ def light_reflection(
         else:
             base_light_color = list(bg_color)
     for i in range(3):
-        base_light_color[i] = min(255, base_light_color[i] + random.randint(10, 30))
+        base_light_color[i] = min(255, base_light_color[i] + randomness.randint(10, 30))
 
     light_color = tuple(base_light_color)
     reflection = Image.new("RGBA", (width, height), light_color)
@@ -133,11 +134,11 @@ def shadow_overlay(
     shadow_draw = ImageDraw.Draw(shadow)
 
     # Random edge selection (0=top, 1=right, 2=bottom, 3=left)
-    edge = random.randint(0, 3)
+    edge = randomness.randint(0, 3)
 
     # Random shadow parameters - how far the shadow extends and its opacity
-    max_depth = random.uniform(0.15, 0.5) * min(image.width, image.height)
-    opacity = random.randint(20, 120)
+    max_depth = randomness.uniform(0.15, 0.5) * min(image.width, image.height)
+    opacity = randomness.randint(20, 120)
 
     # Create uneven shadow polygon with integer coordinates
     points: list[tuple[float, float]] = []
@@ -146,36 +147,40 @@ def shadow_overlay(
         points = [(0.0, 0.0), (float(image.width), 0.0)]
         for i in range(polygons_points):
             x = (i + 1) * image.width / 6
-            y = random.uniform(max_depth * 0.3, max_depth)
+            y = randomness.uniform(max_depth * 0.3, max_depth)
             points.append((x, y))
-        points.append((0.0, random.uniform(max_depth * 0.3, max_depth)))
+        points.append((0.0, randomness.uniform(max_depth * 0.3, max_depth)))
     elif edge == 1:  # Right edge
         points = [(float(image.width), 0.0), (float(image.width), float(image.height))]
         for i in range(polygons_points):
-            x = image.width - random.uniform(max_depth * 0.3, max_depth)
+            x = image.width - randomness.uniform(max_depth * 0.3, max_depth)
             y = (i + 1) * image.height / 6
             points.append((x, y))
-        points.append((image.width - random.uniform(max_depth * 0.3, max_depth), 0.0))
+        points.append(
+            (image.width - randomness.uniform(max_depth * 0.3, max_depth), 0.0)
+        )
     elif edge == 2:  # Bottom edge
         points = [(0.0, float(image.height)), (float(image.width), float(image.height))]
         for i in range(polygons_points):
             x = (i + 1) * image.width / 6
-            y = image.height - random.uniform(max_depth * 0.3, max_depth)
+            y = image.height - randomness.uniform(max_depth * 0.3, max_depth)
             points.append((x, y))
-        points.append((0.0, image.height - random.uniform(max_depth * 0.3, max_depth)))
+        points.append(
+            (0.0, image.height - randomness.uniform(max_depth * 0.3, max_depth))
+        )
     else:  # Left edge
         points = [(0.0, 0.0), (0.0, float(image.height))]
         for i in range(polygons_points):
-            x = random.uniform(max_depth * 0.3, max_depth)
+            x = randomness.uniform(max_depth * 0.3, max_depth)
             y = (i + 1) * image.height / 6
             points.append((x, y))
-        points.append((random.uniform(max_depth * 0.3, max_depth), 0.0))
+        points.append((randomness.uniform(max_depth * 0.3, max_depth), 0.0))
 
     # Draw shadow polygon
     shadow_draw.polygon(points, fill=(0, 0, 0, opacity))
 
     # Apply blur for fuzzy edges
-    blur_radius = random.uniform(10, 30)
+    blur_radius = randomness.uniform(10, 30)
     shadow = shadow.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
     # Composite with original image
@@ -221,7 +226,7 @@ def shadow_gradient(
 
     # Create gradient
     gradient = Image.new("L", (1, height), color=0xFF)
-    gradient_opacity = random.uniform(0.3, 0.7)
+    gradient_opacity = randomness.uniform(0.3, 0.7)
     for y in range(height):
         # Gradient from transparent to semi-transparent black
         gradient.putpixel((0, y), int(255 * (y / height) * gradient_opacity))

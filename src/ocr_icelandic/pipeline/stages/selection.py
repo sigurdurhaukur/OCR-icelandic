@@ -1,8 +1,8 @@
 """Selection stages for choosing fonts, colors, textures, and layout."""
 
-import random
-
 from PIL import Image, ImageColor
+
+from ocr_icelandic import randomness
 
 from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.pipeline.core import BaseStage, PipelineState
@@ -22,44 +22,44 @@ def get_random_background_color() -> tuple[int, int, int]:
     Returns:
         RGB color tuple
     """
-    rand_val = random.random()
+    rand_val = randomness.random()
 
     if rand_val < 0.85:
         # Light colors (paper-like) - 85% probability
-        paper_type = random.choice(["white", "cream", "aged"])
+        paper_type = randomness.choice(["white", "cream", "aged"])
 
         if paper_type == "white":
-            base = random.randint(245, 252)
-            r = base + random.randint(-3, 3)
-            g = base + random.randint(-5, 0)
-            b = base + random.randint(-8, 0)
+            base = randomness.randint(245, 252)
+            r = base + randomness.randint(-3, 3)
+            g = base + randomness.randint(-5, 0)
+            b = base + randomness.randint(-8, 0)
         elif paper_type == "cream":
-            base = random.randint(235, 245)
-            r = base + random.randint(0, 8)
-            g = base + random.randint(-5, 3)
-            b = base + random.randint(-12, -3)
+            base = randomness.randint(235, 245)
+            r = base + randomness.randint(0, 8)
+            g = base + randomness.randint(-5, 3)
+            b = base + randomness.randint(-12, -3)
         else:  # aged
-            base = random.randint(220, 235)
-            r = base + random.randint(5, 15)
-            g = base + random.randint(0, 10)
-            b = base + random.randint(-15, -5)
+            base = randomness.randint(220, 235)
+            r = base + randomness.randint(5, 15)
+            g = base + randomness.randint(0, 10)
+            b = base + randomness.randint(-15, -5)
 
     elif rand_val < 0.95:
         # Dark colors - 10% probability
-        base = random.randint(20, 80)
-        r = base + random.randint(-10, 10)
-        g = base + random.randint(-10, 10)
-        b = base + random.randint(-10, 10)
+        base = randomness.randint(20, 80)
+        r = base + randomness.randint(-10, 10)
+        g = base + randomness.randint(-10, 10)
+        b = base + randomness.randint(-10, 10)
 
     else:
         # Colorful - 5% probability
-        bright_channel = random.randint(0, 2)
+        bright_channel = randomness.randint(0, 2)
         colors = [0, 0, 0]
-        colors[bright_channel] = random.randint(150, 255)
+        colors[bright_channel] = randomness.randint(150, 255)
 
         for i in range(3):
             if i != bright_channel:
-                colors[i] = random.randint(30, 220)
+                colors[i] = randomness.randint(30, 220)
 
         r, g, b = colors
 
@@ -118,9 +118,9 @@ def get_random_font_color(
     # Fall back to random generation
     max_attempts = 100
     for _ in range(max_attempts):
-        r = random.randint(0, 255)
-        g = random.randint(0, 255)
-        b = random.randint(0, 255)
+        r = randomness.randint(0, 255)
+        g = randomness.randint(0, 255)
+        b = randomness.randint(0, 255)
         font_color = (r, g, b)
         font_lum = luminance(font_color)
         if contrast_ratio(bg_lum, font_lum) >= contrast_threshold:
@@ -148,7 +148,7 @@ class SelectFontStage(BaseStage):
         if self.fixed_font:
             state.font_path = self.fixed_font
         elif self.random_selection and self.fonts:
-            state.font_path = random.choice(self.fonts)
+            state.font_path = randomness.choice(self.fonts)
         elif self.fonts:
             state.font_path = self.fonts[0]
 
@@ -222,12 +222,12 @@ class SelectLayoutStage(BaseStage):
         if self.num_columns is not None:
             state.num_columns = self.num_columns
         else:
-            state.num_columns = random.randint(*self.column_range)
+            state.num_columns = randomness.randint(*self.column_range)
 
         if self.column_width is not None:
             state.column_width = self.column_width
         else:
-            state.column_width = random.randint(*self.column_width_range)
+            state.column_width = randomness.randint(*self.column_width_range)
 
         state.column_gap = self.column_gap
 
@@ -260,8 +260,8 @@ class SelectPaperTextureStage(BaseStage):
         self.probability = probability
 
     def __call__(self, state: PipelineState) -> PipelineState:
-        if self.textures and random.random() < self.probability:
-            state.paper_texture_path = random.choice(self.textures)
+        if self.textures and randomness.random() < self.probability:
+            state.paper_texture_path = randomness.choice(self.textures)
             self._add_metadata(state, "texture", state.paper_texture_path)
             logger.debug("Selected paper texture: %s", state.paper_texture_path)
         return state
@@ -284,7 +284,7 @@ class SelectBackgroundImageStage(BaseStage):
         self.expansion_factor = expansion_factor
 
     def __call__(self, state: PipelineState) -> PipelineState:
-        if random.random() > self.probability:
+        if randomness.random() > self.probability:
             return state
 
         all_backgrounds: list[tuple[str, bool]] = []
@@ -296,7 +296,7 @@ class SelectBackgroundImageStage(BaseStage):
         if not all_backgrounds:
             return state
 
-        bg_path, receives_shadow = random.choice(all_backgrounds)
+        bg_path, receives_shadow = randomness.choice(all_backgrounds)
 
         try:
             background = Image.open(bg_path).convert("RGBA")
@@ -306,25 +306,10 @@ class SelectBackgroundImageStage(BaseStage):
             expanded_width = int(width * self.expansion_factor)
             expanded_height = int(height * self.expansion_factor)
 
-            bg_width, bg_height = background.size
-            if bg_width < expanded_width or bg_height < expanded_height:
-                # Tile background
-                tiles_x = (expanded_width // bg_width) + 2
-                tiles_y = (expanded_height // bg_height) + 2
-                tiled = Image.new("RGBA", (bg_width * tiles_x, bg_height * tiles_y))
-                for i in range(tiles_x):
-                    for j in range(tiles_y):
-                        tiled.paste(background, (i * bg_width, j * bg_height))
-                left = (tiled.width - expanded_width) // 2
-                top = (tiled.height - expanded_height) // 2
-                background = tiled.crop(
-                    (left, top, left + expanded_width, top + expanded_height)
-                )
-            else:
-                background = background.resize(
-                    (expanded_width, expanded_height),
-                    Image.Resampling.BICUBIC,
-                )
+            background = background.resize(
+                (expanded_width, expanded_height),
+                Image.Resampling.BICUBIC,
+            )
 
             state.background_image = background
             state.background_receives_shadow = receives_shadow

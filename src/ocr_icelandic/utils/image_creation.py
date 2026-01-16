@@ -42,6 +42,7 @@ def create_image_with_text(
     displacement_strength: float = 3.5,
     displacement_lighting: bool = True,
     paragraph_font_configs: list[ParagraphFontConfig] | None = None,
+    add_noise: bool = True,
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -66,6 +67,8 @@ def create_image_with_text(
             the paper's folds/creases using displacement mapping
         displacement_strength: Pixel displacement multiplier (1.0-5.0 typical)
         displacement_lighting: If True, apply lighting effects based on paper surface normals
+        add_noise: If True, add Gaussian noise to the background for realism. Set to False
+            for deterministic output (useful for testing).
 
     Returns:
         tuple: (PIL Image object, string of text that actually fits in the image, paragraph bounding boxes)
@@ -118,7 +121,7 @@ def create_image_with_text(
         # Convert back to RGBA
         image = image_rgb.convert("RGBA")
         draw = ImageDraw.Draw(image)
-    else:
+    elif add_noise:
         logger.debug("Adding Gaussian noise to background for realism")
         # add gaussian noice to the background to make it more realistic and less uniform
         noise = Image.effect_noise(scaled_image_size, 10)
@@ -131,6 +134,8 @@ def create_image_with_text(
         dirt_rgba = dirt_texture.convert("RGBA")
         image = Image.blend(image, dirt_rgba, 0.05)
         draw = ImageDraw.Draw(image)
+    else:
+        logger.debug("Skipping noise for deterministic output")
 
     font = load_font(font_path=font_path, font_size=scaled_font_size)
 

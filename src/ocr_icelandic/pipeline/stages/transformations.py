@@ -1,7 +1,8 @@
 """Transformation stages for applying image effects."""
 
-import random
 from collections.abc import Callable
+
+from ocr_icelandic import randomness
 
 
 from ocr_icelandic.logging_config import get_logger
@@ -65,7 +66,7 @@ class ApplyTransformationsStage(BaseStage):
         for category_name, category_config in TRANSFORMATION_CONFIG.items():
             for transform_name, config in category_config.items():
                 prob = probabilities.get(transform_name, config["probability"])
-                if random.random() >= prob:
+                if randomness.random() >= prob:
                     continue
 
                 transform_func = config["function"]
@@ -122,7 +123,7 @@ class SingleTransformStage(BaseStage):
         if state.image is None:
             return state
 
-        if random.random() >= self.probability:
+        if randomness.random() >= self.probability:
             return state
 
         logger.debug("Applying single transformation: %s", self.transform_name)

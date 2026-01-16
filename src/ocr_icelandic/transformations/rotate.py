@@ -1,7 +1,8 @@
 import math
-import random
 
 from PIL import Image
+
+from ocr_icelandic import randomness
 
 from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
@@ -244,12 +245,12 @@ def rotate(
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Generate document rotation angle
-    angle = random.uniform(-5, 5)
+    angle = randomness.uniform(-5, 5)
 
     # Generate different background angle if background is provided
     background_angle = None
     if background_image is not None:
-        background_angle = random.uniform(-5, 5)
+        background_angle = randomness.uniform(-5, 5)
         logger.debug(
             "Rotating document by %.2f degrees, background by %.2f degrees",
             angle,

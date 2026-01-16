@@ -1,6 +1,6 @@
-import random
-
 from PIL import Image
+
+from ocr_icelandic import randomness
 
 from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
@@ -110,7 +110,7 @@ def _apply_perspective_distortion(
     if distortion_type == "book_curve":
         # Simulate book spine curvature - push center inward, pull edges outward
         # Reduced intensity to keep content within bounds
-        curve_intensity = random.uniform(0.02, 0.08)
+        curve_intensity = randomness.uniform(0.02, 0.08)
         vertical_offset = int(height * curve_intensity)
         horizontal_inset = int(width * curve_intensity * 0.3)
 
@@ -142,9 +142,9 @@ def _apply_perspective_distortion(
 
     elif distortion_type == "camera_angle":
         # Simulate viewing document from an angle (trapezoidal perspective)
-        angle_type = random.choice(["top", "bottom", "left", "right"])
+        angle_type = randomness.choice(["top", "bottom", "left", "right"])
         # Reduced strength to prevent content from going out of bounds
-        perspective_strength = random.uniform(0.05, 0.15)
+        perspective_strength = randomness.uniform(0.05, 0.15)
 
         if angle_type == "top":
             # Camera above, looking down - top appears smaller
@@ -193,8 +193,8 @@ def _apply_perspective_distortion(
     else:  # combined
         # Combine both book curve and camera angle
         # Very conservative values for combined effect
-        curve = random.uniform(0.02, 0.05)
-        angle = random.uniform(0.03, 0.08)
+        curve = randomness.uniform(0.02, 0.05)
+        angle = randomness.uniform(0.03, 0.08)
 
         v_offset = int(height * curve)
         h_inset = int(width * curve * 0.3)
@@ -246,6 +246,11 @@ def _apply_perspective_distortion(
     bbox = _find_content_bbox(transformed)
 
     # Crop and resize back to original dimensions
+    # Minimum crop ratio to prevent extreme upscaling (50% = max 2x upscale)
+    MIN_CROP_RATIO = 0.5
+    min_crop_width = int(width * MIN_CROP_RATIO)
+    min_crop_height = int(height * MIN_CROP_RATIO)
+
     if bbox:
         x0, y0, x1, y1 = bbox
         # Add safety margin to ensure we capture all content
@@ -254,6 +259,26 @@ def _apply_perspective_distortion(
         y0 = max(0, y0 - margin)
         x1 = min(canvas_width, x1 + margin)
         y1 = min(canvas_height, y1 + margin)
+
+        # Ensure crop is not too small to prevent extreme upscaling
+        crop_width = x1 - x0
+        crop_height = y1 - y0
+
+        if crop_width < min_crop_width:
+            expand_x = (min_crop_width - crop_width) // 2
+            x0 = max(0, x0 - expand_x)
+            x1 = min(canvas_width, x0 + min_crop_width)
+            # Adjust x0 if x1 hit the boundary
+            if x1 - x0 < min_crop_width:
+                x0 = max(0, x1 - min_crop_width)
+
+        if crop_height < min_crop_height:
+            expand_y = (min_crop_height - crop_height) // 2
+            y0 = max(0, y0 - expand_y)
+            y1 = min(canvas_height, y0 + min_crop_height)
+            # Adjust y0 if y1 hit the boundary
+            if y1 - y0 < min_crop_height:
+                y0 = max(0, y1 - min_crop_height)
 
         cropped = transformed.crop((x0, y0, x1, y1))
         metadata["crop_box"] = (x0, y0, x1, y1)
@@ -528,7 +553,7 @@ def perspective(
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    perspective_type = random.choice(["book_curve", "camera_angle", "combined"])
+    perspective_type = randomness.choice(["book_curve", "camera_angle", "combined"])
     perspective_img, perspective_meta, transformed_bg = _apply_perspective_distortion(
         image, perspective_type, background_image
     )

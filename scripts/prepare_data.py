@@ -8,14 +8,12 @@ from collections import defaultdict
 import json
 import logging
 import os
-import random
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import cast
 
 from datasets import Dataset, DatasetDict, Image as DatasetImage, load_dataset
-from PIL import Image
 import psutil
 from ocr_icelandic.fonts import (
     get_compatible_fonts,
@@ -119,6 +117,7 @@ class DataConfig:
     enable_font_styles: bool = False  # Whether to apply font styles (bold/underline)
     font_bold_probability: float = 0.2  # Probability of applying bold style
     font_underline_probability: float = 0.1  # Probability of applying underline style
+    random_seed: int = 42  # Random seed for reproducibility
 
 
 @dataclass
@@ -131,6 +130,7 @@ class GenerationConfig(DataConfig):
     available_paper_textures: list[str] | None = None
     available_no_shadow_backgrounds: list[str] | None = None
     available_with_shadow_backgrounds: list[str] | None = None
+
 
 @dataclass
 class SingleImageData:
@@ -211,12 +211,14 @@ def generate_paragraph_styles(
     Returns:
         List of dicts: [{"bold": bool, "underline": bool}, ...]
     """
+    from ocr_icelandic import randomness
+
     styles = []
     for _ in range(num_paragraphs):
         styles.append(
             {
-                "bold": random.random() < bold_probability,
-                "underline": random.random() < underline_probability,
+                "bold": randomness.random() < bold_probability,
+                "underline": randomness.random() < underline_probability,
             }
         )
     return styles
@@ -249,7 +251,9 @@ def generate_single_text(
         SelectColorsStage(
             random_background=cfg.use_random_backgrounds,
             random_font_color=cfg.use_random_font_colors,
-            fixed_bg_color=cfg.img_background_color if not cfg.use_random_backgrounds else None,
+            fixed_bg_color=cfg.img_background_color
+            if not cfg.use_random_backgrounds
+            else None,
             fixed_font_color=cfg.font_color if not cfg.use_random_font_colors else None,
         ),
         SelectLayoutStage(
@@ -288,7 +292,6 @@ def generate_single_text(
 
             if cfg.enable_font_size_variation or cfg.enable_font_styles:
                 from ocr_icelandic.utils.text_layout import (
-                    ParagraphFontConfig,
                     calculate_paragraph_font_sizes,
                 )
 
@@ -312,7 +315,9 @@ def generate_single_text(
                         cfg.font_underline_probability,
                     )
                 else:
-                    paragraph_styles = [{"bold": False, "underline": False}] * num_paragraphs
+                    paragraph_styles = [
+                        {"bold": False, "underline": False}
+                    ] * num_paragraphs
 
                 # Note: ParagraphFontConfig will be built in RenderTextStage
                 # when paragraph_font_configs is set on state
@@ -354,7 +359,7 @@ def generate_single_text(
                 )
             )
 
-            remaining_text = remaining_text[len(result.fitted_text):].lstrip()
+            remaining_text = remaining_text[len(result.fitted_text) :].lstrip()
 
     return images, len(text_chunks)
 
@@ -515,6 +520,12 @@ def create_image_dataset(cfg: DataConfig) -> None:
     Args:
         cfg (DataConfig): Configuration for dataset creation
     """
+    # Set random seed for reproducibility
+    from ocr_icelandic import randomness
+
+    randomness.set_seed(cfg.random_seed)
+    logger.info(f"Random seed set to {cfg.random_seed} for reproducibility")
+
     # load dataset
     dataset = cast(
         Dataset,
@@ -601,7 +612,10 @@ def create_image_dataset(cfg: DataConfig) -> None:
                     "paragraph_bboxes": item.get("paragraph_bboxes"),
                     "transformations": item.get("transformations"),
                 }
-                image_metadata_path.write_text(json.dumps(image_metadata, ensure_ascii=False, indent=4), encoding="utf-8")
+                image_metadata_path.write_text(
+                    json.dumps(image_metadata, ensure_ascii=False, indent=4),
+                    encoding="utf-8",
+                )
 
         logger.info(f"Image dataset also saved to local directory {local_output_path}")
 

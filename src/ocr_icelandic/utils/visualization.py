@@ -1,8 +1,8 @@
 """Visualization and debugging utilities."""
 
-import random
-
 from PIL import Image, ImageDraw, ImageFont
+
+from ocr_icelandic import randomness
 
 from ocr_icelandic.logging_config import get_logger
 
@@ -33,7 +33,7 @@ def dummy_text_with_line_breaks(num_sentences: int = 5) -> str:
         # "Final line that definitely won't fit in tiny images.",
         "„Megi hann fara og vera en ég vona svo sannarlega að hann komi aldrei aftur til Íslands,“ segir Helgi Magnús Gunnarsson fyrrverandi vararíkssaksóknari um nýjustu vendingar í máli Mohamads Kourani. Helgi, sem sætti líflátshótunum",
     ]
-    selected_sentences = random.choices(sentences, k=num_sentences)
+    selected_sentences = randomness.choices(sentences, k=num_sentences)
     result = "\n".join(selected_sentences)
     logger.debug("Generated dummy text of length %d", len(result))
     return result

@@ -1,6 +1,6 @@
-import random
-
 from PIL import Image
+
+from ocr_icelandic import randomness
 
 from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
@@ -99,7 +99,7 @@ def tight_crop(
         )
 
     # Add random padding around the text (10% to 25% of text dimensions)
-    pad_ratio = random.uniform(0.1, 0.25)
+    pad_ratio = randomness.uniform(0.1, 0.25)
     pad_x = int(text_width * pad_ratio)
     pad_y = int(text_height * pad_ratio)
 
@@ -123,21 +123,11 @@ def tight_crop(
             },
             paragraph_bboxes_copy,
         )
-    print("=" * 10)
-    print(
-        "Cropping image to box (%d, %d, %d, %d) with padding ratio %.3f",
-        crop_x0,
-        crop_y0,
-        crop_x1,
-        crop_y1,
-        pad_ratio,
-    )
+
     # Crop the image
     cropped = image.crop((crop_x0, crop_y0, crop_x1, crop_y1))
-    print("Cropped image size: %s", cropped.size)
     # Create a transparent canvas of original size
     result = Image.new("RGBA", (image_width, image_height), (0, 0, 0, 0))
-    print("Created transparent canvas of size: %s", result.size)
 
     # Calculate position to center the cropped content
     paste_x = (image_width - crop_width) // 2
@@ -145,7 +135,6 @@ def tight_crop(
 
     # Paste the cropped image onto the transparent canvas
     result.paste(cropped, (paste_x, paste_y))
-    print("Pasted cropped image at position: (%d, %d)", paste_x, paste_y)
 
     # Transform all bounding boxes (only translation, no scaling)
     transformed_bboxes = []

@@ -1,7 +1,8 @@
 """Paper texture and background utilities."""
 
-import random
 from pathlib import Path
+
+from ocr_icelandic import randomness
 
 import cv2
 import numpy as np
@@ -43,7 +44,7 @@ def _tile_texture_seamlessly(
     target_size: tuple[int, int],
     random_offset: bool = True,
     blend_edges: bool = True,
-    edge_blend_width: int = 10,
+    edge_blend_width: int = 25,
 ) -> Image.Image:
     """
     Tile texture to fill target size with seamless edges.
@@ -69,10 +70,14 @@ def _tile_texture_seamlessly(
         max_offset_x = max(0, tex_width - target_width)
         max_offset_y = max(0, tex_height - target_height)
         offset_x = (
-            random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
+            randomness.randint(0, max_offset_x)
+            if random_offset and max_offset_x > 0
+            else 0
         )
         offset_y = (
-            random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+            randomness.randint(0, max_offset_y)
+            if random_offset and max_offset_y > 0
+            else 0
         )
         return texture.crop(
             (offset_x, offset_y, offset_x + target_width, offset_y + target_height)
@@ -100,10 +105,10 @@ def _tile_texture_seamlessly(
     max_offset_x = max(0, tiled.width - target_width)
     max_offset_y = max(0, tiled.height - target_height)
     offset_x = (
-        random.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
+        randomness.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
     )
     offset_y = (
-        random.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
+        randomness.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
     )
 
     return tiled.crop(
@@ -195,7 +200,7 @@ def apply_paper_texture(
             (img_width, img_height),
             random_offset=True,
             blend_edges=True,
-            edge_blend_width=10,
+            edge_blend_width=25,
         )
 
         # Convert to numpy arrays for processing
@@ -300,14 +305,14 @@ def create_paper_drop_shadow(
         Tuple of (shadow image RGBA, shadow offset (x, y))
     """
     # Random shadow offset (small, 1-3 pixels)
-    offset_x = random.randint(1, max_offset)
-    offset_y = random.randint(1, max_offset)
+    offset_x = randomness.randint(1, max_offset)
+    offset_y = randomness.randint(1, max_offset)
 
     # Random blur radius (small, 2-5 pixels)
-    blur_radius = random.uniform(2, max_blur)
+    blur_radius = randomness.uniform(2, max_blur)
 
     # Random opacity variation
-    opacity = random.randint(int(shadow_opacity * 0.7), shadow_opacity)
+    opacity = randomness.randint(int(shadow_opacity * 0.7), shadow_opacity)
 
     # Create shadow from foreground alpha channel
     if foreground.mode == "RGBA":

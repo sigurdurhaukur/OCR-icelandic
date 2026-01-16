@@ -10,8 +10,9 @@ damage, and printing artifacts:
 """
 
 from pathlib import Path
-import random
 from typing import Any
+
+from ocr_icelandic import randomness
 
 import cv2
 import numpy as np
@@ -41,7 +42,7 @@ def blur(
     logger.debug("Applying blur transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    radius = random.uniform(0.1, 0.5)
+    radius = randomness.uniform(0.1, 0.5)
     logger.debug("Blur radius: %.2f", radius)
     return (
         image.filter(ImageFilter.GaussianBlur(radius)),
@@ -77,12 +78,12 @@ def textured_stains(
     logger.debug("Applying textured stains transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    texture = random.choice(stain_textures)
+    texture = randomness.choice(stain_textures)
     logger.debug("Using stain texture: %s", texture)
     stain = Image.open(texture).convert("RGBA")
     # Adjust scale factor to ensure stain fits within image
     max_scale = min(image.width / stain.width, image.height / stain.height) * 0.8
-    scale_factor = random.uniform(0.5, min(1.5, max_scale))
+    scale_factor = randomness.uniform(0.5, min(1.5, max_scale))
     new_size = (int(stain.width * scale_factor), int(stain.height * scale_factor))
     stain = stain.resize(new_size, Image.Resampling.LANCZOS)
 
@@ -123,8 +124,8 @@ def textured_stains(
         stain.putalpha(Image.fromarray(alpha_array.astype(np.uint8)))
 
     # Allow stain to be positioned partially outside image bounds
-    pos_x = random.randint(-stain.width // 2, image.width - stain.width // 2)
-    pos_y = random.randint(-stain.height // 2, image.height - stain.height // 2)
+    pos_x = randomness.randint(-stain.width // 2, image.width - stain.width // 2)
+    pos_y = randomness.randint(-stain.height // 2, image.height - stain.height // 2)
 
     # Ensure image is RGBA
     if image.mode != "RGBA":
@@ -212,8 +213,8 @@ def dusty_paper(
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    grain_size = random.randint(1, 3)
-    intensity = random.uniform(0.05, 0.15)
+    grain_size = randomness.randint(1, 3)
+    intensity = randomness.uniform(0.05, 0.15)
     noise = Image.effect_noise(image.size, grain_size * 10)
     grainy_overlay = noise.convert("RGBA" if image.mode == "RGBA" else "RGB")
     dusty_image = Image.blend(image, grainy_overlay, intensity)
@@ -245,7 +246,7 @@ def reverse_bleed_through(
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    intensity = np.random.uniform(
+    intensity = randomness.np_uniform(
         0.01, 0.04
     )  # Adjust intensity of the bleed-through effect
 
@@ -271,10 +272,12 @@ def reverse_bleed_through(
 
     # Generate random shift
     shift_x = int(
-        np.random.choice([-1, 1]) * np.random.randint(min_shift_x, min_shift_x + 10)
+        randomness.np_choice([-1, 1])
+        * randomness.np_randint(min_shift_x, min_shift_x + 10)
     )
     shift_y = int(
-        np.random.choice([-1, 1]) * np.random.randint(min_shift_y, min_shift_y + 10)
+        randomness.np_choice([-1, 1])
+        * randomness.np_randint(min_shift_y, min_shift_y + 10)
     )
 
     # Create transformation matrix to shift the flipped image (bleed-through)
@@ -347,8 +350,8 @@ def paper_edge_unevenness(
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Parameters for light edge unevenness
-    max_deviation = random.randint(1, 5)  # Small deviations for subtle effect
-    num_points = random.randint(10, 20)  # Control points per edge
+    max_deviation = randomness.randint(1, 5)  # Small deviations for subtle effect
+    num_points = randomness.randint(10, 20)  # Control points per edge
 
     width, height = image.size
 
@@ -374,7 +377,7 @@ def paper_edge_unevenness(
             if i == 0 or i == num_pts:
                 deviation = 0
             else:
-                deviation = random.randint(0, max_dev)
+                deviation = randomness.randint(0, max_dev)
             x += inward_direction[0] * deviation
             y += inward_direction[1] * deviation
             points.append((x, y))

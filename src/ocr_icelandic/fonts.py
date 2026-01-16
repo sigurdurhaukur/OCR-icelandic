@@ -3,7 +3,6 @@ Font management utilities for OCR Icelandic.
 Handles font discovery, Google Fonts synchronization, and Icelandic character support checking.
 """
 
-import random
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -272,7 +271,7 @@ def get_compatible_fonts(
     from ocr_icelandic.font_cache import FontCompatibilityCache
     from ocr_icelandic.language_support import LanguageRegistry
 
-    random.seed(42)  # For reproducibility
+    # Note: Reproducibility is now managed centrally via ocr_icelandic.randomness.set_seed()
 
     # Get language character set (raises NotImplementedError if not supported)
     language = LanguageRegistry.get_language(language_code)

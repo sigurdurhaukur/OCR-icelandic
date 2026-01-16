@@ -7,9 +7,10 @@ This module provides:
 - apply_random_transformation: Main entry point for applying transformations
 """
 
-import random
 from collections.abc import Callable
 from typing import Any
+
+from ocr_icelandic import randomness
 
 from PIL import Image
 
@@ -144,7 +145,7 @@ def _select_transformations_by_probability(
         )
 
         # Select based on probability
-        if random.random() < prob:
+        if randomness.random() < prob:
             logger.debug("Selected transformation: %s (probability: %.2f)", name, prob)
             selected.append(config["function"])
 
