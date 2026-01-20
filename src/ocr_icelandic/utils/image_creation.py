@@ -97,6 +97,12 @@ def create_image_with_text(
         scaled_font_size,
     )
 
+    # Scale column_width and column_gap if provided
+    if column_width is not None:
+        column_width = int(column_width * scale_factor)
+    column_gap = int(column_gap * scale_factor)
+    image = Image.new("RGB", scaled_image_size, color=bg_color)
+
     # Convert bg_color to RGBA if it's RGB
     if isinstance(bg_color, tuple) and len(bg_color) == 3:
         bg_color_rgba = bg_color + (255,)

@@ -1,18 +1,19 @@
-import sys
-from pathlib import Path
-from PIL import Image
-from concurrent.futures import ThreadPoolExecutor
-import math
 import logging
+import math
+import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
 import psutil
-from rich.logging import RichHandler
+from PIL import Image
 from rich.console import Console
+from rich.logging import RichHandler
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
 
 INPUT_FOLDER = Path(".")
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 def is_image(file_path: Path) -> bool:
     is_img = file_path.suffix.lower() in IMAGE_EXTENSIONS
     if not is_img:
-        logger.debug(f"Skipped non-image file: {file_path.name}")
+        logger.debug("Skipped non-image file: %s", file_path.name)
     return is_img
 
 
@@ -59,7 +60,7 @@ def process_image(image_path: Path) -> None:
                 )
             elif img.mode == "P" and "transparency" in img.info:
                 has_transparency = True
-                logger.debug(f"{image_path.name}: Palette mode with transparency")
+                logger.debug("%s: Palette mode with transparency", image_path.name)
             else:
                 logger.debug(
                     f"{image_path.name}: Mode={img.mode}, No transparency channel"
@@ -97,10 +98,12 @@ def process_image(image_path: Path) -> None:
                 # Keep original format with transparency
                 if img.mode == "P":
                     img = img.convert("RGBA")
-                    logger.debug(f"Converted {image_path.name} from palette to RGBA")
+                    logger.debug("Converted %s from palette to RGBA", image_path.name)
                 output_path = image_path.with_suffix(".png")
                 img.save(output_path, "PNG", optimize=True)
-                logger.debug(f"Saved {image_path.name} as PNG (preserved transparency)")
+                logger.debug(
+                    "Saved %s as PNG (preserved transparency)", image_path.name
+                )
             else:
                 # Convert to JPEG
                 original_mode = img.mode
@@ -118,25 +121,25 @@ def process_image(image_path: Path) -> None:
                         optimize=True,
                         exif=exif_data,
                     )
-                    logger.debug(f"Saved {image_path.name} as JPEG (preserved EXIF)")
+                    logger.debug("Saved %s as JPEG (preserved EXIF)", image_path.name)
                 else:
                     img.save(output_path, "JPEG", quality=JPEG_QUALITY, optimize=True)
-                    logger.debug(f"Saved {image_path.name} as JPEG")
+                    logger.debug("Saved %s as JPEG", image_path.name)
 
             # Remove original if it's different from output
             if image_path != output_path:
                 image_path.unlink()
-                logger.debug(f"Removed original file: {image_path.name}")
+                logger.debug("Removed original file: %s", image_path.name)
             else:
-                logger.debug(f"Overwrote original file: {image_path.name}")
+                logger.debug("Overwrote original file: %s", image_path.name)
 
     except Exception as e:
-        logger.error(f"Error processing {image_path}: {e}")
+        logger.error("Error processing %s: %s", image_path, e)
 
 
 def main():
     if not INPUT_FOLDER.exists() or not INPUT_FOLDER.is_dir():
-        logger.error(f"{INPUT_FOLDER} is not a valid directory")
+        logger.error("%s is not a valid directory", INPUT_FOLDER)
         sys.exit(1)
 
     subfolders = [
@@ -159,7 +162,9 @@ def main():
                 if file_path.is_file() and is_image(file_path)
             ]
 
-            logger.debug(f"Found {len(images_to_process)} images in {subfolder.name}")
+            logger.debug(
+                "Found %d images in %s", len(images_to_process), subfolder.name
+            )
 
             task = progress.add_task(
                 f"[cyan]Processing {subfolder.name}", total=len(images_to_process)

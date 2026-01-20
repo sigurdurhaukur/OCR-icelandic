@@ -4,14 +4,14 @@ Handles font discovery, Google Fonts synchronization, and Icelandic character su
 """
 
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TypedDict
 
 import requests
-from fontTools.ttLib import TTFont
 import tenacity
+from fontTools.ttLib import TTFont
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ocr_icelandic.logging_config import get_logger
 
@@ -71,7 +71,7 @@ def fetch_google_fonts_list(api_key: str) -> list[GoogleFont] | None:
         data = response.json()
         return data.get("items", [])
     except requests.exceptions.RequestException as e:
-        logger.error(f"Failed to fetch Google Fonts list: {e}")
+        logger.error("Failed to fetch Google Fonts list: %s", e)
         return None
 
 
@@ -101,10 +101,10 @@ def download_font_file(font_url: str, output_path: Path) -> None:
         with open(output_path, "wb") as f:
             f.write(response.content)
     except requests.exceptions.RequestException as e:
-        logger.warning(f"Failed to download font from {font_url}: {e}")
+        logger.warning("Failed to download font from %s: %s", font_url, e)
         raise e
     except OSError as e:
-        logger.warning(f"Failed to write font to {output_path}: {e}")
+        logger.warning("Failed to write font to %s: %s", output_path, e)
         raise e
 
 
@@ -150,7 +150,7 @@ def download_font_task(font: GoogleFont, fonts_path: Path) -> tuple[int, int, in
             download_font_file(url, output_path)
             local_downloaded += 1
         except Exception as e:
-            logger.warning(f"Final failure: Failed to download font from {url}: {e}")
+            logger.warning("Final failure: Failed to download font from %s: %s", url, e)
             local_failed += 1
 
     return local_downloaded, local_skipped, local_failed
@@ -188,7 +188,7 @@ def sync_google_fonts(api_key: str, google_fonts_dir: str) -> bool:
             )
             return False
 
-    logger.info(f"Found {len(fonts_list)} Google Fonts to sync")
+    logger.info("Found %d Google Fonts to sync", len(fonts_list))
 
     # Create directory if needed
     fonts_path.mkdir(parents=True, exist_ok=True)
@@ -268,6 +268,7 @@ def get_compatible_fonts(
         >>> fonts = get_compatible_fonts("ja")
     """
     import time
+
     from ocr_icelandic.font_cache import FontCompatibilityCache
     from ocr_icelandic.language_support import LanguageRegistry
 
@@ -280,7 +281,7 @@ def get_compatible_fonts(
     logger.info(
         f"Scanning for {language.name_english} ({language_code}) compatible fonts"
     )
-    logger.info(f"Character set: {characters_to_check}")
+    logger.info("Character set: %s", characters_to_check)
 
     # Initialize cache if enabled
     cache = FontCompatibilityCache(cache_dir) if use_cache else None
@@ -314,9 +315,9 @@ def get_compatible_fonts(
         google_fonts_path = Path(google_fonts_directory)
         if google_fonts_path.exists() and google_fonts_path.is_dir():
             font_dirs.append(str(google_fonts_path))
-            logger.info(f"Including Google Fonts directory: {google_fonts_directory}")
+            logger.info("Including Google Fonts directory: %s", google_fonts_directory)
 
-    logger.info(f"Searching for fonts in directories: {font_dirs}")
+    logger.info("Searching for fonts in directories: %s", font_dirs)
 
     start_time = time.time()
     available_fonts: list[str] = []
@@ -382,7 +383,7 @@ def get_compatible_fonts(
         f"in {duration:.2f}s"
     )
     if cache:
-        logger.info(f"Cache hits: {cache_hits}, Cache misses: {cache_misses}")
+        logger.info("Cache hits: %d, Cache misses: %d", cache_hits, cache_misses)
 
     return available_fonts
 

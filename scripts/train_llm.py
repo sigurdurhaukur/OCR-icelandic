@@ -148,7 +148,7 @@ class EvaluationCallback(TrainerCallback):
                 )
                 generated_samples[f"eval_sample_{i}"] = generated_text
             except Exception as e:
-                logger.warning(f"Failed to generate sample {i}: {e}")
+                logger.warning("Failed to generate sample %d: %s", i, e)
                 generated_samples[f"eval_sample_{i}"] = f"Generation failed: {str(e)}"
 
         # Log to wandb
@@ -207,7 +207,7 @@ def prepare_datasets(
         cfg.hf_data_directory,
     )
 
-    logger.info(f"Dataset loaded: {ds}")
+    logger.info("Dataset loaded: %s", ds)
 
     # split and shuffle the dataset
     train_ds, eval_ds = ds["train"].train_test_split(test_size=0.2, seed=42).values()
@@ -215,9 +215,9 @@ def prepare_datasets(
     eval_ds, test_ds = eval_ds.train_test_split(test_size=0.5, seed=42).values()
 
     # aim for 80% train, 10% eval, 10% test split (and at least 2k samples in each)
-    logger.info(f"Training dataset size: {len(train_ds)}")
-    logger.info(f"Evaluation dataset size: {len(eval_ds)}")
-    logger.info(f"Test dataset size: {len(test_ds)}")
+    logger.info("Training dataset size: %d", len(train_ds))
+    logger.info("Evaluation dataset size: %d", len(eval_ds))
+    logger.info("Test dataset size: %d", len(test_ds))
 
     # for now we will not use the test set, but it could be used for final evaluation after training
 
@@ -278,8 +278,8 @@ def prepare_datasets(
             range(min(cfg.max_eval_entries, len(eval_dataset)))
         )
 
-    logger.info(f"Training dataset size: {len(train_dataset)}")
-    logger.info(f"Evaluation dataset size: {len(eval_dataset)}")
+    logger.info("Training dataset size: %d", len(train_dataset))
+    logger.info("Evaluation dataset size: %d", len(eval_dataset))
 
     return train_dataset, eval_dataset
 
@@ -379,7 +379,7 @@ def lora_merge_and_save_full_model(model, text_model, tokenizer, cfg):
 
     # Optionally push to Hugging Face Hub
     if cfg.push_to_hub and cfg.hub_repo_id:
-        logger.info(f"Pushing model to the hub at {cfg.hub_repo_id}...")
+        logger.info("Pushing model to the hub at %s...", cfg.hub_repo_id)
         model.push_to_hub(cfg.hub_repo_id)
 
 
@@ -392,8 +392,8 @@ def fine_tune_text_model(cfg: TrainConfig) -> None:
         None
     """
 
-    logger.info(f"Using device: {DEVICE}")
-    logger.info(f"Loading model {cfg.model_id}...")
+    logger.info("Using device: %s", DEVICE)
+    logger.info("Loading model %s...", cfg.model_id)
 
     # Load the original model
     model = Idefics3ForConditionalGeneration.from_pretrained(
@@ -560,7 +560,7 @@ def main() -> None:
     try:
         cfg = TrainConfig(**cfg)
     except TypeError as e:  # pylint: disable=broad-exception-raised
-        logger.error(f"Error: {e}\n\nUsage: python train_llm.py")
+        logger.error("Error: %s\n\nUsage: python train_llm.py", e)
         sys.exit(1)
 
     fine_tune_text_model(cfg)
