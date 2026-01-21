@@ -16,6 +16,7 @@ from syrupy.extensions.amber import AmberSnapshotExtension
 from syrupy.extensions.single_file import SingleFileSnapshotExtension, WriteMode
 
 from ocr_icelandic.utils import create_image_with_text
+from ocr_icelandic import randomness
 
 
 # ============================================================================
@@ -238,7 +239,7 @@ class TestPerspectiveSnapshots:
         """Test perspective transformation with book curve effect."""
         image, _, bboxes = base_test_image
 
-        random.seed(42)
+        randomness.set_seed(42)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
@@ -260,7 +261,7 @@ class TestPerspectiveSnapshots:
         image, _, bboxes = base_test_image
 
         # Seed to force "top" angle type
-        random.seed(10)
+        randomness.set_seed(10)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
@@ -282,7 +283,7 @@ class TestPerspectiveSnapshots:
         image, _, bboxes = base_test_image
 
         # Seed to force "left" angle type
-        random.seed(15)
+        randomness.set_seed(15)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
@@ -301,7 +302,7 @@ class TestPerspectiveSnapshots:
         """Test perspective transformation with combined effects."""
         image, _, bboxes = base_test_image
 
-        random.seed(50)
+        randomness.set_seed(50)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
@@ -322,7 +323,7 @@ class TestPerspectiveSnapshots:
         """Test perspective transformation with multi-column layout."""
         image, _, bboxes = multicolumn_test_image
 
-        random.seed(100)
+        randomness.set_seed(100)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
