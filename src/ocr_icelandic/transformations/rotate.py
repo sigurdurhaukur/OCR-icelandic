@@ -45,36 +45,25 @@ def _rotate_within_bounds(
         logger.debug(
             "Preparing background for rotation by %.2f degrees", background_angle
         )
-        # Expand background to ensure full coverage after rotation
-        # Calculate diagonal for worst-case rotation
-        diagonal = int(math.sqrt(width**2 + height**2))
-        expanded_size = int(diagonal * 1.3)  # 30% safety margin
-
+        # Scale background to cover the canvas dimensions
+        # Use max scale to ensure full coverage (same approach as perspective.py)
         bg_width, bg_height = background_image.size
-        if bg_width < expanded_size or bg_height < expanded_size:
-            # Tile background to fill expanded size
-            tiles_x = (expanded_size // bg_width) + 2
-            tiles_y = (expanded_size // bg_height) + 2
-            tiled = Image.new("RGBA", (bg_width * tiles_x, bg_height * tiles_y))
-            for i in range(tiles_x):
-                for j in range(tiles_y):
-                    tiled.paste(background_image, (i * bg_width, j * bg_height))
-            # Crop to desired size from center
-            left = (tiled.width - expanded_size) // 2
-            top = (tiled.height - expanded_size) // 2
-            expanded_bg = tiled.crop(
-                (left, top, left + expanded_size, top + expanded_size)
-            )
-        else:
-            expanded_bg = background_image.resize(
-                (expanded_size, expanded_size), Image.Resampling.BICUBIC
-            )
+        scale_x = canvas_width / bg_width
+        scale_y = canvas_height / bg_height
+        bg_scale = max(scale_x, scale_y)
 
-        # Paste onto canvas same size as document canvas
-        bg_canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
-        bg_x = (canvas_width - expanded_bg.width) // 2
-        bg_y = (canvas_height - expanded_bg.height) // 2
-        bg_canvas.paste(expanded_bg, (bg_x, bg_y))
+        new_width = int(bg_width * bg_scale)
+        new_height = int(bg_height * bg_scale)
+        expanded_bg = background_image.resize(
+            (new_width, new_height), Image.Resampling.BICUBIC
+        )
+
+        # Crop from center to match canvas size
+        left = (new_width - canvas_width) // 2
+        top = (new_height - canvas_height) // 2
+        bg_canvas = expanded_bg.crop(
+            (left, top, left + canvas_width, top + canvas_height)
+        ).convert("RGBA")
 
     # Rotate document with transparent fill
     rotated = canvas.rotate(
