@@ -87,19 +87,33 @@ class FinalizeImageStage(BaseStage):
             state.image = state.image.convert("RGB")
             logger.debug("Converted image to RGB from mode: %s", state.image.mode)
 
-        # Scale down if render_scale > 1
-        scale = state.render_scale
-        if scale > 1:
+        # Scale down to target size if image is larger
+        current_width, current_height = state.image.size
+        target_width, target_height = state.image_size
+
+        if current_width != target_width or current_height != target_height:
+            # Calculate actual scale factors based on current vs target dimensions
+            scale_x = current_width / target_width
+            scale_y = current_height / target_height
+
             state.image = state.image.resize(state.image_size, Image.Resampling.LANCZOS)
 
-            # Scale down bounding boxes
+            # Scale down bounding boxes using actual scale factors
             for bbox in state.paragraph_bboxes:
-                bbox["bbox"][0] = int(bbox["bbox"][0] / scale)
-                bbox["bbox"][1] = int(bbox["bbox"][1] / scale)
-                bbox["bbox"][2] = int(bbox["bbox"][2] / scale)
-                bbox["bbox"][3] = int(bbox["bbox"][3] / scale)
+                bbox["bbox"][0] = round(bbox["bbox"][0] / scale_x)
+                bbox["bbox"][1] = round(bbox["bbox"][1] / scale_y)
+                bbox["bbox"][2] = round(bbox["bbox"][2] / scale_x)
+                bbox["bbox"][3] = round(bbox["bbox"][3] / scale_y)
 
-            logger.debug("Scaled down from %dx to target size", scale)
+            logger.debug(
+                "Scaled down from %dx%d to %dx%d (scale: %.2fx, %.2fy)",
+                current_width,
+                current_height,
+                target_width,
+                target_height,
+                scale_x,
+                scale_y,
+            )
 
         return state
 
