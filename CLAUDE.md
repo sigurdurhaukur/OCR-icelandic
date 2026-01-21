@@ -1,669 +1,478 @@
 # OCR-icelandic: Language-Agnostic OCR Model Training Pipeline
 
-## Repository Overview
+## Overview
 
-**OCR-icelandic** is a comprehensive training recipe for creating optical character recognition (OCR) Vision Transformer models for languages with limited or no existing image-text paired datasets. The project demonstrates how to bootstrap OCR capabilities for any language given only a text corpus by:
+Training recipe for OCR Vision Transformer models for languages with limited image-text paired datasets. Generates realistic synthetic document images from plain text, then fine-tunes vision-language models (SmolVLM, IDEFICS3) using LoRA adapters.
 
-1. Generating synthetic document images from plain text
-2. Fine-tuning vision-language models (SmolVLM, IDEFICS3) using LoRA adapters
-3. Providing a flexible, language-agnostic pipeline
-
-**Key Innovation**: Solves the data bottleneck for low-resource languages by creating realistic synthetic OCR training data from text-only corpora.
+**Key Innovation**: Creates unlimited synthetic OCR training data from text-only corpora with realistic backgrounds, textures, and transformations.
 
 ## Repository Structure
 
 ```
 OCR-icelandic/
-├── scripts/                              # Core training and processing scripts
-│   ├── prepare_data.py                   # Synthetic OCR dataset generator
-│   ├── smol_vlm_ft.py                    # SmolVLM fine-tuning with LoRA
-│   ├── train_llm.py                      # Text-to-text model fine-tuning
-│   ├── merge_text_model_to_idefics.py    # Model merging utilities
-│   ├── build_gold_data.py                # Evaluation dataset builder
-│   ├── helpers.py                        # Configuration dataclasses
-│   └── webui.py                          # Gradio-based inference interface
+├── scripts/
+│   ├── prepare_data.py          # Synthetic OCR dataset generator
+│   ├── smol_vlm_ft.py           # SmolVLM fine-tuning with LoRA
+│   ├── train_llm.py             # Text-to-text model fine-tuning
+│   ├── build_gold_data.py       # Evaluation dataset builder
+│   └── webui.py                 # Gradio inference interface
 │
-├── src/ocr_icelandic/                    # Core library modules
-│   ├── __init__.py
-│   ├── utils.py                          # Image generation utilities
-│   └── transformations/                  # Image transformation modules
-│       ├── __init__.py
-│       ├── transformations.py            # Main transformation orchestrator
-│       ├── perspective.py                # Perspective distortion effects
-│       ├── rotate.py                     # Rotation transformations
-│       ├── skew.py                       # Skewing transformations
-│       └── shared.py                     # Shared utility functions
+├── src/ocr_icelandic/
+│   ├── config.py                # DataConfig, GenerationConfig
+│   ├── randomness.py            # Centralized RNG for reproducibility
+│   ├── image_generator.py       # Pipeline-based image generation
+│   │
+│   ├── pipeline/
+│   │   ├── core.py              # Pipeline, PipelineState, Stage protocol
+│   │   └── stages/
+│   │       ├── selection.py     # Font/color/layout/texture/background
+│   │       ├── rendering.py     # Text rendering to image
+│   │       ├── transformations.py
+│   │       └── postprocessing.py
+│   │
+│   ├── transformations/
+│   │   ├── pipeline.py          # Transformation orchestration
+│   │   ├── effects.py           # Blur, dusty, stains, bleed-through
+│   │   ├── perspective.py       # 3D perspective distortions
+│   │   ├── rotate.py            # Rotation transformations
+│   │   ├── lighting.py          # Light reflection, shadows
+│   │   ├── tight_crop.py        # Content-aware cropping
+│   │   └── shared.py            # Utility functions
+│   │
+│   ├── utils/
+│   │   ├── image_creation.py    # Core text rendering
+│   │   ├── text_layout.py       # Text wrapping and layout
+│   │   ├── texture.py           # Paper textures and noise
+│   │   ├── visualization.py     # Bounding box visualization
+│   │   ├── font.py              # Font loading utilities
+│   │   └── color.py             # Color generation
+│   │
+│   ├── font_cache.py            # Font caching system
+│   ├── language_support.py      # Language character sets
+│   ├── fonts.py                 # Font discovery
+│   └── colors.py                # Color utilities
 │
-├── tests                                 # Tests for the src/ocr_icelandic module
+├── assets/
+│   ├── papers/                  # 19 paper textures
+│   ├── stains/                  # 77 stain textures (coffee, tea, ink, etc.)
+│   ├── backgrounds/
+│   │   ├── no_shadow/           # Distant backgrounds (landscapes, cityscapes)
+│   │   └── with_shadow/         # Close backgrounds (desks)
+│   └── generate_assets.py       # Replicate API asset generator
 │
-├── slurm/                                # SLURM job submission scripts
-│   ├── generate_synthetic_data.slurm     # Data generation job
-│   ├── train_smolVLM.slurm              # Model training job
-│   └── train_smolVLM_LLM.slurm          # LLM training job
+├── tests/
+│   ├── test_transformations.py
+│   ├── test_transformation_snapshots.py
+│   └── __snapshots__/
 │
-├── notebooks/                            # Jupyter notebooks
-│   ├── smol_vlm_inference.ipynb         # Inference demonstrations
-│   └── Smol_VLM_FT.ipynb                # Fine-tuning walkthrough
-│
-├── assets/                               # Asset files
-│   └── stains/                          # Coffee stain textures
-│
-├── google_fonts/                         # Font files directory
-├── isl_synthetic_ocr_output/            # Generated datasets
-├── local_output/                         # Local temporary outputs
-├── figures/                              # Documentation figures
-│
-├── pyproject.toml                        # Project dependencies
-├── requirements.txt                      # Autogenerated requirements
-├── uv.lock                              # UV lock file
-├── .pre-commit-config.yaml              # Pre-commit hooks config
-└── README.md                             # Project documentation
+├── slurm/                       # SLURM job scripts
+└── notebooks/                   # Jupyter notebooks
 ```
 
-## scripts/prepare_data.py - Synthetic Data Generation
+## Pipeline Architecture
 
-### Purpose
+The core is a modular pipeline that decomposes image generation into composable stages.
 
-Generates realistic synthetic OCR training data by rendering text in various fonts, sizes, colors, and applying realistic document transformations. This is the core data generation script that enables training OCR models without manually annotated image-text pairs.
+**Location**: `src/ocr_icelandic/pipeline/core.py`
 
-### High-Level Workflow
+### PipelineState
 
-```
-Text Corpus (HuggingFace) → Text Processing → Image Rendering → Transformations → Dataset Splits → Output
-```
-
-### Key Functions
-
-#### 1. `create_image_dataset(cfg: DataConfig)`
-
-**Location**: scripts/prepare_data.py:120
-
-Main entry point that orchestrates the entire dataset creation pipeline.
-
-**Process:**
-1. Loads text dataset from HuggingFace (e.g., `arnastofnun/IGC-2024`)
-2. Extracts text entries from specified column
-3. Generates synthetic images from text entries using parallel processing
-4. Creates train/validation/test splits (80/10/10)
-5. Saves dataset to disk and optionally pushes to HuggingFace Hub
-
-**Key Features:**
-- Automatic dataset splitting with proper proportions
-- Progress tracking with rich console output
-- Optional HuggingFace Hub integration
-- Error handling and logging
-
-#### 2. `generate_image_dataset(texts: list[str], cfg: DataConfig)`
-
-**Location**: scripts/prepare_data.py:172
-
-Parallel processing of text-to-image conversion using multiprocessing.
-
-**Features:**
-- Uses `ProcessPoolExecutor` for true parallelism (bypasses Python GIL)
-- Automatically scales workers based on physical CPU cores
-- Handles text overflow by splitting into multiple images
-- Tracks comprehensive metadata:
-  - Font used (name and path)
-  - Colors (background and font)
-  - Applied transformations
-  - Paragraph bounding boxes (for layout analysis)
-  - Column count and layout
-
-**Performance:**
-- CPU-bound operation optimized for parallel execution
-- Progress bar with estimated completion time
-- Handles large datasets efficiently
-
-#### 3. `generate_single_text(text: str, cfg: GenerationConfig)`
-
-**Location**: scripts/prepare_data.py:223
-
-Generates images for a single text entry with sophisticated layout and styling.
-
-**Process:**
-1. **Text Splitting**: Splits long texts into chunks at sentence boundaries
-2. **Font Selection**: Randomly selects from compatible fonts (if enabled)
-3. **Color Generation**:
-   - Random background color (white/cream/aged paper)
-   - Contrasting font color with luminance check
-4. **Layout Determination**: Selects random column count (1-5, configurable)
-5. **Image Rendering**: Creates image using `create_image_with_text()`
-6. **Transformations**: Applies random realistic document effects
-7. **Metadata Tracking**: Records all parameters and bounding boxes
-
-**Returns:** List of `SingleImageData` objects containing:
-- `image`: PIL Image object
-- `text`: Ground truth text
-- `metadata`: Dict with fonts, colors, transformations, bboxes, etc.
-
-#### 4. `split_long_text(text: str, max_length: int)`
-
-**Location**: scripts/prepare_data.py:314
-
-Intelligently splits text at sentence boundaries to avoid mid-sentence breaks.
-
-**Features:**
-- Uses regex to find sentence endings (., !, ?)
-- Respects maximum length while keeping sentences intact
-- Falls back to word-level splitting if necessary
-- Handles edge cases (very long sentences, no punctuation)
-
-**Why It Matters:** Prevents training on unnaturally broken text that could harm model quality.
-
-#### 5. `get_icelandic_compatible_fonts()`
-
-**Location**: scripts/prepare_data.py:55
-
-Scans system font directories for fonts supporting special characters.
-
-**Character Support Check:** `ÁáÐðÉéÍíÓóÚúÝýÞþÆæÖö` (Icelandic characters)
-
-**Scanned Directories:**
-- **macOS**:
-  - `/System/Library/Fonts`
-  - `/System/Library/Fonts/Supplemental`
-- **Linux**:
-  - `/usr/share/fonts`
-  - `/usr/local/share/fonts`
-- **Windows**:
-  - `C:/Windows/Fonts`
-  - `AppData` fonts
-
-**Process:**
-1. Recursively scans font directories
-2. Loads each `.ttf` file using `fontTools`
-3. Checks if font contains required characters
-4. Returns list of compatible font paths
-
-**Adaptation Tip:** Modify the character check string to match your target language's special characters.
-
-#### 6. Color Generation Functions
-
-**`get_random_background_color()`** - scripts/prepare_data.py:337
-
-Generates realistic paper colors with natural variations.
-
-**Paper Types:**
-- **White**: RGB(245-252, base-5, base-8) - Bright white paper
-- **Cream**: RGB(235-245, base-3, base-12) - Yellowish tint
-- **Aged**: RGB(220-235, base+15, base-15) - Brownish tone
-
-**`get_random_font_color(bg_color)`** - scripts/prepare_data.py:357
-
-Generates contrasting text colors for readability.
-
-**Features:**
-- Calculates luminance contrast (minimum 100)
-- Biases toward darker colors for typical documents
-- Returns RGB tuple ensuring visibility
-
-### Configuration (DataConfig)
-
-**Location**: scripts/helpers.py:52
-
-Complete configuration dataclass with all parameters:
+Immutable data container passing through all stages:
 
 ```python
 @dataclass
-class DataConfig:
-    # Data source
-    dataset_path: str = "arnastofnun/IGC-2024"
-    text_column: str = "document"
-    data_directory: str = "parla"
-    split: str = "train"
-    max_entries: int = 10
-
-    # Image properties
-    image_width: int = 512
-    image_height: int = 512
-    image_dpi: int = 72
-    img_background_color: str = "white"
-
-    # Font properties
-    font_path: str = "/usr/share/fonts"
-    font_size: int | None = None  # Fixed size, or None to use range
-    font_size_range: tuple[int, int] = (11, 24)
-    font_color: str = "black"
-    use_random_font_colors: bool = True
-    use_random_fonts: bool = True
-    use_random_font_sizes: bool = True
-    use_random_backgrounds: bool = True
-
-    # Text layout
-    text_vertical_alignment: str = "center"  # top, middle, bottom
-    text_horizontal_alignment: str = "left"  # left, center, right
-    num_columns: int | None = None  # Fixed count, or None to use range
-    column_range: tuple[int, int] = (1, 5)
-    column_gap: int = 20  # pixels between columns
-    column_width: int | None = None  # Fixed width, or None to use range
-    column_width_range: tuple[int, int] = (100, 512)
-
-    # Text processing
-    max_length: int = 512
-    max_text_length: int = 2000  # chars before splitting
-
-    # Output
-    local_output_dir: str = "./local_output"
-    push_to_hub: bool = False
-    hub_repo_id: str = "Sigurdur/isl_synthetic_ocr"
+class PipelineState:
+    text: str
+    image_size: tuple[int, int]
+    dpi: int
+    image: Image.Image | None
+    fitted_text: str
+    paragraph_bboxes: list[dict]
+    font_path: str | None
+    font_size: int
+    font_color: tuple[int, int, int] | str
+    bg_color: tuple[int, int, int] | str
+    paper_texture_path: str | None
+    background_image: Image.Image | None
+    num_columns: int
+    column_gap: int
+    alignment: str
+    vertical_alignment: str
+    transformation_metadata: list[dict]
+    stage_metadata: dict
 ```
 
-### Dependencies
+### Stage Protocol
 
-**Core Libraries:**
-- `datasets` - HuggingFace datasets library for loading/saving
-- `PIL (Pillow)` - Image manipulation and rendering
-- `fontTools` - Font compatibility checking
-- `omegaconf` - Hierarchical configuration management
-- `tqdm` - Progress bars
-- `psutil` - CPU core detection for parallel processing
-- `concurrent.futures` - Parallel execution
+```python
+class Stage(Protocol):
+    @property
+    def name(self) -> str: ...
+    def __call__(self, state: PipelineState) -> PipelineState: ...
+```
+
+### Standard Stages
+
+**Selection** (`pipeline/stages/selection.py`):
+- `SelectFontStage` - Choose font from compatible fonts
+- `SelectColorsStage` - Generate contrasting colors
+- `SelectLayoutStage` - Column count and alignment
+- `SelectPaperTextureStage` - Paper texture selection
+- `SelectBackgroundImageStage` - Background image selection
+
+**Rendering** (`pipeline/stages/rendering.py`):
+- `RenderTextStage` - Render text to RGBA image with bboxes
+
+**Transformation** (`pipeline/stages/transformations.py`):
+- `ApplyTransformationsStage` - Apply random document transformations
+
+**Postprocessing** (`pipeline/stages/postprocessing.py`):
+- `CompositeBackgroundStage` - Blend onto background
+- `FinalizeImageStage` - Convert RGBA to RGB
+- `VisualizeBBoxesStage` - Debug visualization
+
+### Custom Pipeline Example
+
+```python
+from ocr_icelandic.pipeline.core import Pipeline
+from ocr_icelandic.pipeline.stages import (
+    SelectFontStage, SelectColorsStage, SelectLayoutStage,
+    SelectPaperTextureStage, SelectBackgroundImageStage,
+    RenderTextStage, ApplyTransformationsStage,
+    CompositeBackgroundStage, FinalizeImageStage
+)
+
+pipeline = Pipeline([
+    SelectFontStage(),
+    SelectColorsStage(),
+    SelectLayoutStage(),
+    SelectPaperTextureStage(),
+    SelectBackgroundImageStage(),
+    RenderTextStage(),
+    ApplyTransformationsStage(),
+    CompositeBackgroundStage(),
+    FinalizeImageStage(),
+])
+
+state = PipelineState(text="Your text", image_size=(512, 512))
+state = pipeline(state)
+image = state.image
+bboxes = state.paragraph_bboxes
+```
+
+## Reproducibility
+
+**Location**: `src/ocr_icelandic/randomness.py`
+
+```python
+from ocr_icelandic.randomness import set_seed, get_seed, reset, rng, np_rng
+
+set_seed(42)           # Set both Python random and NumPy
+seed = get_seed()      # Get current seed
+reset()                # Reset to non-reproducible
+
+value = rng.random()                    # Random float [0, 1)
+choice = rng.choice(['a', 'b', 'c'])   # Random choice
+array = np_rng.uniform(0, 1, (10,))    # NumPy random
+```
+
+Generate reproducible dataset:
+```bash
+python scripts/prepare_data.py max_entries=1000 random_seed=42
+```
+
+## Background Images
+
+**Location**: `src/ocr_icelandic/pipeline/stages/postprocessing.py`
+
+| Category | Location | Use Case |
+|----------|----------|----------|
+| Landscapes | `assets/backgrounds/no_shadow/landscapes/` | Distant backgrounds |
+| Cityscapes | `assets/backgrounds/no_shadow/cityscapes/` | Distant backgrounds |
+| Desks | `assets/backgrounds/with_shadow/desks/` | Close backgrounds |
+
+Pipeline automatically adapts transformations based on background type (shadow vs no-shadow).
+
+## Asset Generation
+
+**Location**: `assets/generate_assets.py`
+
+| Category | Count |
+|----------|-------|
+| Papers | 19 |
+| Coffee/Tea/Ink/Wine stains | 77 |
+| Landscapes | 18 |
+| Cityscapes | 15 |
+| Desks | 18 |
+
+```bash
+python assets/generate_assets.py                    # Generate all
+python assets/generate_assets.py --category papers  # Specific category
+python assets/generate_assets.py --dry-run          # Preview prompts
+```
+
+## Data Generation
+
+### Workflow
+
+```
+Text Corpus (HuggingFace)
+    → Text Selection & Splitting
+    → Run Image Generation Pipeline
+    → Apply Random Transformations
+    → Create Train/Val/Test Splits
+    → Save to Disk / Push to Hub
+```
+
+### Entry Point
+
+**Location**: `src/ocr_icelandic/image_generator.py`
+
+```python
+def generate_single_text(text: str, cfg: GenerationConfig) -> list[SingleImageData]:
+    """Generate images for a single text entry using pipeline."""
+```
+
+Returns `SingleImageData` objects with: `image`, `text`, `font_path`, `font_size`, `font_color`, `bg_color`, `paragraph_bboxes`, `transformations`.
+
+### Configuration
+
+See `src/ocr_icelandic/config.py` for full `DataConfig` options. Key settings:
+
+- **Dataset**: `dataset_path`, `text_column`, `max_entries`
+- **Image**: `image_width`, `image_height`, `image_dpi`
+- **Font**: `font_size_range`, `use_random_fonts`, `language_code`
+- **Layout**: `column_range`, `column_gap`, `text_horizontal_alignment`
+- **Bounding Boxes**: `bbox_per_column`, `bbox_max_chars`
+- **Textures**: `use_paper_textures`, `use_background_images`
+- **Transformations**: `apply_random_transformations`
+- **Output**: `local_output_dir`, `save_to_disk`, `push_to_hub`
 
 ### Usage Examples
 
-#### Basic Usage
-
 ```bash
-# Generate 10 synthetic images (default)
+# Basic
 python scripts/prepare_data.py
 
-# Generate 1000 images
-python scripts/prepare_data.py max_entries=1000
-```
-
-#### Custom Configuration
-
-```bash
+# With backgrounds and reproducibility
 python scripts/prepare_data.py \
-  dataset_path=arnastofnun/IGC-2024 \
-  text_column=document \
-  data_directory=wiki \
   max_entries=5000 \
-  image_width=768 \
-  image_height=1024 \
-  font_size=14 \
+  use_background_images=True \
+  random_seed=42
+
+# Custom dataset
+python scripts/prepare_data.py \
+  dataset_path=my_org/my_corpus \
+  text_column=text_field \
+  language_code=en \
+  max_entries=10000
+
+# Multi-column with textures
+python scripts/prepare_data.py \
   num_columns=2 \
-  use_random_fonts=True \
-  use_random_backgrounds=True \
-  local_output_dir=./my_ocr_dataset
+  column_gap=30 \
+  use_paper_textures=True \
+  paper_texture_probability=0.8
 ```
 
-#### Push to HuggingFace Hub
+## Bounding Box Configuration
+
+Control how bounding boxes are generated for training data:
+
+### bbox_per_column
+
+**Type**: `bool` (default: `False`)
+
+When `True`, creates separate bounding boxes when a paragraph spans multiple columns. When `False`, creates a single union bbox for the entire paragraph across all columns.
+
+**Use case**: Column-aware document analysis where each column section needs independent bbox annotations.
+
+**Example**:
+```bash
+# Split bboxes at column boundaries
+python scripts/prepare_data.py \
+  bbox_per_column=True \
+  num_columns=3
+```
+
+**Output format**:
+- Paragraph spanning columns 0→1→2 creates 3 separate bboxes
+- Each bbox has `sequence_number`: 0, 1, 2...
+- Each bbox has `columns`: [0], [1], [2] respectively
+
+### bbox_max_chars
+
+**Type**: `int | None` (default: `None`)
+
+Maximum characters per bounding box. When set, splits bboxes at rendered line boundaries when the character limit is exceeded. `None` means no character limit.
+
+**Use case**: Limiting bbox size in training data to prevent extremely large bounding boxes that are difficult for models to process.
+
+**Example**:
+```bash
+# Limit bbox size to 100 characters
+python scripts/prepare_data.py bbox_max_chars=100
+```
+
+**Behavior**:
+- Character count uses visible text only (strips whitespace)
+- Splits occur at line boundaries (never mid-line)
+- If a single line exceeds the limit, it still gets a bbox (no mid-line splits)
+- Empty lines contribute 0 characters
+
+### Combined Usage
+
+Both settings work together and are independent:
 
 ```bash
+# Split by both column boundaries and character limit
 python scripts/prepare_data.py \
-  max_entries=10000 \
-  push_to_hub=True \
-  hub_repo_id=myusername/my-ocr-dataset
+  bbox_per_column=True \
+  bbox_max_chars=150 \
+  num_columns=2
 ```
 
-#### Fixed Layout Configuration
+**Priority**: Column splits are checked first, then character splits within each column section.
 
-```bash
-# Single column, centered, white background
-python scripts/prepare_data.py \
-  num_columns=1 \
-  text_horizontal_alignment=center \
-  use_random_backgrounds=False \
-  img_background_color=white
-```
+### Bbox Output Format
 
-## src/ Folder Structure
+When splitting is enabled, bbox dictionaries include additional metadata:
 
-### src/ocr_icelandic/utils.py
-
-**Purpose**: Core image generation and text layout utilities.
-
-This module handles the actual rendering of text as images with sophisticated multi-column layouts, alignment options, and metadata tracking.
-
-#### Key Functions
-
-##### `create_image_with_text()`
-
-**Location**: src/ocr_icelandic/utils.py:17
-
-Main function for rendering text as images with sophisticated layout.
-
-**Signature:**
 ```python
-def create_image_with_text(
-    text: str,
-    image_size: tuple[int, int] = (512, 512),
-    font_path: str = "DejaVuSans.ttf",
-    font_size: int = 12,
-    font_color: str | tuple[int, int, int] = "black",
-    bg_color: str | tuple[int, int, int] = "white",
-    alignment: str = "left",
-    vertical_alignment: str = "top",
-    dpi: int = 72,
-    num_columns: int = 1,
-    column_gap: int = 20,
-    column_width: int | None = None,
-) -> tuple[Image.Image, str, list[dict]]
+{
+    "paragraph_index": 0,          # Original paragraph index
+    "sequence_number": 0,          # 0, 1, 2, ... for split bboxes
+    "paragraph_text": "Full...",   # Complete paragraph text (same for all splits)
+    "columns": [2],                # List of columns this bbox spans
+    "char_count": 85,              # Character count in this bbox
+    "bbox": [100, 200, 300, 250]   # Bounding box coordinates [x0, y0, x1, y1]
+}
 ```
 
-**Features:**
-- **Multi-column layout** with configurable gaps
-- **Intelligent text wrapping** respects word boundaries
-- **Paragraph preservation** with blank line handling
-- **Vertical alignment** options: top, center, bottom
-- **Horizontal alignment** options: left, center, right
-- **DPI-aware rendering** for consistent quality across sizes
-- **Bounding box tracking** for each paragraph
-- **Background noise** and texture for realism
+**Backward compatibility**: All bboxes include these fields. When no splitting occurs:
+- `sequence_number` = 0
+- `columns` = list with single column
+- `char_count` = total characters in paragraph
 
-**Process:**
-1. Load and verify font
-2. Calculate column dimensions
-3. Wrap text to fit column width
-4. Distribute lines across columns
-5. Calculate paragraph positions
-6. Render text to image
-7. Track bounding boxes for each paragraph
-8. Return image, fitted text, and metadata
+## Core Modules
 
-**Returns:**
-- `image`: PIL Image with rendered text
-- `fitted_text`: Text that actually fit in the image
-- `paragraph_bboxes`: List of dicts with coordinates `{x1, y1, x2, y2}`
+### config.py
+- `DataConfig` - Complete configuration for dataset generation
+- `GenerationConfig` - Extended config with resolved resources
+- `SingleImageData` - Generated image with metadata
 
-**Example Usage:**
+### image_generator.py
+- `generate_single_text()` - Main entry point for pipeline-based generation
+
+### pipeline/core.py
+- `Pipeline` - Orchestrates stages
+- `PipelineState` - State container
+- `Stage` - Protocol for stages
+
+### utils/image_creation.py
+- `create_image_with_text()` - Core text rendering with multi-column layout
+
+### utils/texture.py
+- `load_paper_textures()`, `generate_paper_texture()`, `apply_texture()`
+
+### font_cache.py
+
 ```python
-from ocr_icelandic.utils import create_image_with_text
+from ocr_icelandic.font_cache import FontCache
 
-image, text, bboxes = create_image_with_text(
-    text="Your text here",
-    image_size=(512, 512),
-    font_size=12,
-    num_columns=2,
-    column_gap=20,
-    alignment="left",
-    vertical_alignment="center"
-)
+cache = FontCache(".fontcache", language_code="is")
+compatible_fonts = cache.get_fonts(font_dirs=["/usr/share/fonts"], language_code="is")
 ```
 
-##### `wrap_text()`
+### language_support.py
 
-**Location**: src/ocr_icelandic/utils.py:175
+```python
+from ocr_icelandic.language_support import LanguageRegistry
 
-Wraps text to fit within specified width, preserving leading whitespace and tabs.
+lang = LanguageRegistry.get("is")  # Icelandic
+required_chars = lang.required_characters
+```
 
-**Features:**
-- Word-boundary wrapping (avoids breaking mid-word)
-- Preserves indentation and formatting
-- Handles edge cases (words longer than line width)
+Supported: Icelandic, English, Norwegian, Danish, Swedish, German, Spanish, French, Portuguese
 
-**Used By:** `create_image_with_text()` for each column
+## Transformations
 
-##### `arrange_lines_in_columns()`
+**Location**: `src/ocr_icelandic/transformations/`
 
-**Location**: src/ocr_icelandic/utils.py:209
+### pipeline.py
 
-Distributes text lines across multiple columns, respecting paragraph boundaries.
+Three configs based on background type:
+- `PIPELINE_NO_BACKGROUND_PROBABILITIES`
+- `PIPELINE_BACKGROUND_WITH_SHADOW_PROBABILITIES`
+- `PIPELINE_BACKGROUND_NO_SHADOW_PROBABILITIES`
 
-**Features:**
-- Balances line distribution across columns
-- Keeps paragraphs together when possible
-- Handles overflow gracefully
-
-**Algorithm:**
-1. Calculate lines per column (total / num_columns)
-2. Split lines at paragraph boundaries closest to target
-3. Ensure no column is empty
-4. Return list of line lists for each column
-
-##### `load_font()`
-
-**Location**: src/ocr_icelandic/utils.py:253
-
-Loads TrueType fonts with fallback to default.
-
-**Features:**
-- Attempts to load specified font path
-- Falls back to DejaVuSans.ttf if not found
-- Returns PIL ImageFont object
-
-### src/ocr_icelandic/transformations/
-
-**Purpose**: Realistic document transformation effects to increase model robustness.
-
-This package applies various image transformations to simulate real-world document capture conditions (scanning, photography, aging, lighting variations).
-
-#### transformations.py
-
-**Location**: src/ocr_icelandic/transformations/transformations.py
-
-Main orchestrator for applying random transformations.
-
-##### `apply_random_transformation()`
-
-**Location**: Line 326
-
-Applies a random subset of transformations to an image.
-
-**Signature:**
 ```python
 def apply_random_transformation(
     image: Image.Image,
     paragraph_bboxes: list[dict],
     stain_textures: list[Image.Image] | None = None,
-) -> tuple[Image.Image, list[dict], list[str]]
+    background_receives_shadow: bool = False,
+) -> tuple[Image.Image, list[dict], list[str]]:
 ```
 
-**Transformation Categories:**
+### effects.py
+- `blur()` - Gaussian blur
+- `dusty_paper()` - Grainy texture
+- `reverse_bleed_through()` - Text showing through
+- `textured_stains()` - Coffee/tea stains
+- `ink_splashes()` - Ink splatter
+- `paper_edge_unevenness()` - Torn edges
 
-1. **CONTENT_TRANSFORMATIONS** - Effects on image content
-   - `blur()` - Gaussian blur (radius 0.1-0.5)
-   - `ink_splashes()` - Random ink splatter effects
-   - `dusty_paper()` - Grainy paper texture
-   - `reverse_bleed_through()` - Text showing through from reverse side
-   - `textured_stains()` - Coffee/tea stain textures from assets
+### perspective.py
+- `_apply_perspective_distortion()` - Main perspective transformation
+- Supports: book curve, camera angle, combined effects
 
-2. **PERSPECTIVE_TRANSFORMATIONS** - Geometric distortions
-   - `rotate()` - Small rotations (-5° to +5°)
-   - `skew()` - Horizontal skewing (-0.2 to 0.2)
-   - `perspective()` - 3D perspective effects (book curve, camera angle)
+### rotate.py
+- `_rotate_within_bounds()` - Rotation with padding
+- `_transform_paragraph_bboxes_for_rotation()`
 
-3. **POSTPROCESSING_TRANSFORMATIONS** - Lighting/shadow effects
-   - `light_reflection()` - Simulated camera flash/light spots
-   - `shadow_overlay()` - Edge shadows from scanning/photography
+### lighting.py
+- `light_reflection()` - Camera flash spots
+- `shadow_overlay()` - Edge shadows
+- `shadow_gradient()` - Directional gradient
 
-**Current Configuration:**
-Lines 376-380 show that by default, only `skew()` is applied. The random selection logic is commented out but can be enabled by uncommenting lines 348-365.
+### tight_crop.py
+- `tight_crop()` - Remove excess whitespace
 
-**Returns:**
-- `transformed_image`: Image with transformations applied
-- `updated_bboxes`: Adjusted paragraph bounding boxes
-- `applied_transformations`: List of transformation names applied
+## Testing
 
-**Example:**
-```python
-from ocr_icelandic.transformations import apply_random_transformation
-
-transformed_img, new_bboxes, transforms = apply_random_transformation(
-    image=original_image,
-    paragraph_bboxes=bboxes,
-    stain_textures=None
-)
-print(f"Applied: {transforms}")  # e.g., ['skew', 'rotate', 'blur']
+```bash
+uv sync --group dev                           # Install test deps
+pytest tests/ -v                              # Run all tests
+pytest tests/test_transformations.py -v       # Specific file
+pytest tests/ --cov=src/ocr_icelandic         # With coverage
 ```
 
-#### perspective.py
+### Snapshot Tests
 
-**Location**: src/ocr_icelandic/transformations/perspective.py
+Visual regression tests for transformations.
 
-Simulates 3D perspective distortions from book spines or camera angles.
+```bash
+# Generate initial snapshots
+pytest tests/test_transformation_snapshots.py --snapshot-update
 
-##### Transformation Types
+# Run tests (detect changes)
+pytest tests/test_transformation_snapshots.py -v
 
-1. **Book Curve** - Simulates curvature from book binding
-   - Creates barrel distortion
-   - More pronounced at edges
-
-2. **Camera Angle** - Trapezoidal perspective from angled viewing
-   - Simulates non-perpendicular camera position
-   - Creates keystone effect
-
-3. **Combined** - Both effects together
-
-##### Key Functions
-
-**`_apply_perspective_distortion()`** - Line 8
-
-Core perspective transformation function.
-
-**Process:**
-1. Calculate 8-parameter perspective transform coefficients
-2. Apply padding to prevent content cutoff
-3. Transform image using PIL perspective
-4. Crop and resize to original dimensions
-5. Transform paragraph bounding boxes accordingly
-
-**Features:**
-- Automatic content detection to avoid over-cropping
-- Precise coefficient calculation for realistic effects
-- Bounding box transformation maintains accuracy
-
-**`_find_perspective_coefficients()`** - Line 81
-
-Calculates the 8-parameter transformation matrix for perspective.
-
-**Math:** Solves system of linear equations mapping source points to destination points.
-
-**`_transform_paragraph_bboxes_for_perspective()`** - Line 135
-
-Updates bounding box coordinates after perspective transformation.
-
-**Process:**
-1. Apply perspective transform to all 4 corners of each bbox
-2. Find new axis-aligned bounding box enclosing transformed corners
-3. Apply padding and cropping adjustments
-4. Return updated bbox list
-
-#### rotate.py
-
-**Location**: src/ocr_icelandic/transformations/rotate.py
-
-Applies small rotations while keeping content within bounds.
-
-##### `_rotate_within_bounds()`
-
-**Location**: Line 8
-
-Rotation transformation with automatic padding.
-
-**Features:**
-- Random rotation angle (-5° to +5°)
-- Automatic padding calculation prevents cutoff
-- Bicubic resampling for quality preservation
-- Expands canvas, then crops back to original size
-
-**Process:**
-1. Generate random angle in range
-2. Calculate padding needed for rotation
-3. Expand image with background color
-4. Rotate using PIL rotate
-5. Crop to original dimensions
-6. Return rotated image
-
-##### `_transform_paragraph_bboxes_for_rotation()`
-
-**Location**: Line 56
-
-Transforms bounding boxes using rotation matrix.
-
-**Math:**
-- Converts coordinates to image center as origin
-- Applies 2D rotation matrix
-- Converts back to top-left origin
-- Adjusts for padding and cropping
-
-**Returns:** Updated bbox list with rotated coordinates
-
-#### skew.py
-
-**Location**: src/ocr_icelandic/transformations/skew.py
-
-Applies horizontal shear transformations.
-
-##### `_skew_within_bounds()`
-
-**Location**: Line 7
-
-Skew transformation with automatic width expansion.
-
-**Features:**
-- Random skew factor (-0.2 to 0.2)
-- Affine transformation (shear)
-- Automatic width calculation for expansion
-- Prevents content cutoff
-
-**Process:**
-1. Generate random skew factor
-2. Calculate new width after shear
-3. Apply affine transform with shear matrix
-4. Resize back to original dimensions
-5. Return skewed image
-
-**Transform Matrix:**
-```
-[1, skew_factor, 0,
- 0, 1,           0]
+# Update after intentional changes
+pytest tests/test_transformation_snapshots.py --snapshot-update
 ```
 
-##### `_transform_paragraph_bboxes_for_skew()`
+Snapshots in `tests/__snapshots__/`: `.png` files for images, `.amber` for bboxes.
 
-**Location**: Line 46
+All snapshot tests use fixed seeds (`random.seed(42)`) for determinism.
 
-Transforms bounding boxes using affine matrix.
+## Training & Inference
 
-**Process:**
-1. Apply shear transformation to all corners
-2. Find new axis-aligned bounding box
-3. Adjust for width changes
-4. Return updated coordinates
+### smol_vlm_ft.py
 
-#### shared.py
+Fine-tunes SmolVLM/IDEFICS3 with LoRA adapters.
 
-**Location**: src/ocr_icelandic/transformations/shared.py
-
-Utility functions used across transformation modules.
-
-**Functions:**
-
-- `_copy_paragraph_bboxes()` - Deep copy of bbox data structures
-- `_clamp_value()` - Clamp values to specified range
-- `_round_bbox()` - Convert float coordinates to integers
-
-**Purpose:** Ensures consistency in bbox handling across all transformations.
-
-## Other Key Scripts
-
-### scripts/smol_vlm_ft.py - Model Fine-tuning
-
-**Purpose**: Fine-tunes SmolVLM or IDEFICS3 vision-language models on synthetic OCR data using LoRA adapters.
-
-**Key Features:**
-- **LoRA/QLoRA support** - Parameter-efficient fine-tuning
-- **Custom OCR metrics** - WER, CER, exact match, special character accuracy
-- **Weights & Biases integration** - Comprehensive experiment tracking
-- **Memory-efficient training** - 8-bit optimizers, gradient checkpointing
-
-**Configuration** (from scripts/helpers.py):
-```python
-@dataclass
-class LoRAConfig:
-    lora_r: int = 32              # LoRA rank
-    lora_alpha: int = 64          # Scaling factor
-    lora_dropout: float = 0.1     # Dropout rate
-    use_dora: bool = False        # Weight decomposition
-    use_rslora: bool = False      # Rank-stabilized LoRA
-```
-
-**Target Modules:** `down_proj`, `o_proj`, `k_proj`, `q_proj`, `gate_proj`, `up_proj`, `v_proj`
-
-**Usage:**
 ```bash
 python scripts/smol_vlm_ft.py \
   model_id=HuggingFaceTB/SmolVLM-Base \
@@ -673,389 +482,112 @@ python scripts/smol_vlm_ft.py \
   learning_rate=1e-4
 ```
 
-### scripts/webui.py - Inference Interface
+Features: LoRA/QLoRA, custom OCR metrics (WER, CER), W&B integration, 8-bit optimizers.
 
-**Purpose**: Gradio-based web interface for interactive OCR inference.
+### webui.py
 
-**Features:**
-- Image upload for OCR extraction
-- Streaming text generation
-- Advanced decoding parameters (temperature, top-p, etc.)
-- Example images from test dataset
-- LoRA adapter loading support
-
-**Usage:**
-```bash
-python scripts/webui.py
-```
-
-Opens browser interface at `http://localhost:7860`
-
-### scripts/train_llm.py
-
-**Purpose**: Fine-tunes text-to-text language models (decoder-only) on OCR text data.
-
-**Use Case**: Can improve text generation quality by training on domain-specific text before merging with vision model.
-
-### scripts/build_gold_data.py
-
-**Purpose**: Creates evaluation datasets from real scanned documents for testing.
-
-**Use Case**: Validates model performance on real-world (non-synthetic) data.
-
-## Dependencies & Setup
-
-### Installation
+Gradio interface for OCR inference.
 
 ```bash
-# Clone repository
-git clone https://github.com/sigurdurhaukur/OCR-icelandic.git
-cd OCR-icelandic
-
-# Install base dependencies
-pip install -e .
-
-# Install with training dependencies
-pip install -e ".[training]"
-
-# Or use UV (recommended for faster installs)
-uv sync
+python scripts/webui.py  # Opens http://localhost:7860
 ```
 
-### Core Dependencies (pyproject.toml)
+## Installation
 
-**Data Processing:**
-- `datasets>=4.1.0` - HuggingFace datasets
-- `pillow>=11.3.0` - Image manipulation
-- `opencv-python>=4.11.0.86` - Computer vision
-- `pyfonts>=1.1.1` - Font management
+```bash
+pip install -e .                    # Base
+pip install -e ".[training]"        # With training deps
+uv sync                             # Or use UV (recommended)
+```
 
-**Configuration & Utilities:**
-- `omegaconf>=2.3.0` - Hierarchical configuration
-- `rich>=14.2.0` - Beautiful terminal output
-- `tqdm>=4.67.1` - Progress bars
-- `psutil>=7.1.3` - System utilities
+### Core Dependencies
+- `datasets`, `pillow`, `opencv-python` - Data processing
+- `omegaconf`, `rich`, `tqdm` - Configuration & utilities
 
 ### Training Dependencies (optional)
-
-**Deep Learning:**
-- `torch>=2.8.0` - PyTorch
-- `transformers>=4.56.2` - HuggingFace transformers
-- `accelerate>=1.10.1` - Distributed training
-- `peft>=0.17.1` - Parameter-efficient fine-tuning
-- `bitsandbytes>=0.48.1` - 8-bit optimization
-
-**Utilities:**
-- `wandb>=0.22.0` - Experiment tracking
-- `gradio>=5.47.0` - Web UI
-- `python-levenshtein>=0.27.3` - Edit distance metrics
+- `torch`, `transformers`, `accelerate`, `peft`, `bitsandbytes`
+- `wandb`, `gradio`
 
 ## Development Workflow
 
-### Complete Pipeline
-
-```
-1. Text Corpus → 2. Generate Synthetic Data → 3. Train Model → 4. Evaluate → 5. Deploy
-```
-
-#### 1. Prepare Text Corpus
-
-Obtain or prepare a text corpus in your target language:
-- Public datasets (HuggingFace, Common Crawl)
-- Wikipedia dumps
-- Government documents
-- Literature collections
-
-#### 2. Generate Synthetic Data
-
 ```bash
+# Generate synthetic data
 python scripts/prepare_data.py \
-  dataset_path=your/text-corpus \
-  text_column=text \
+  dataset_path=your/corpus \
   max_entries=10000 \
-  local_output_dir=./synthetic_ocr_data \
-  push_to_hub=True \
-  hub_repo_id=username/ocr-dataset
-```
+  random_seed=42 \
+  save_to_disk=True
 
-**Output:** HuggingFace dataset with:
-- `image`: Synthetic document images
-- `text`: Ground truth text
-- `metadata`: Fonts, colors, transformations, bboxes
-
-#### 3. Train Model
-
-```bash
+# Fine-tune model
 python scripts/smol_vlm_ft.py \
-  hf_dataset_id=username/ocr-dataset \
-  model_id=HuggingFaceTB/SmolVLM-Base \
-  output_dir=./lora_checkpoints \
-  num_train_epochs=3 \
-  per_device_train_batch_size=8 \
-  learning_rate=1e-4 \
-  lora_r=32 \
-  lora_alpha=64
-```
+  hf_dataset_id=your/dataset \
+  num_train_epochs=3
 
-**Monitor:** Training tracked in Weights & Biases
-
-#### 4. Evaluate
-
-```bash
-# Launch web UI for qualitative testing
+# Evaluate
 python scripts/webui.py
-
-# Or use notebooks for analysis
-jupyter notebook notebooks/smol_vlm_inference.ipynb
 ```
 
-#### 5. Deploy
-
-Trained LoRA adapters can be:
-- Pushed to HuggingFace Hub
-- Loaded for inference with `peft`
-- Merged with base model for deployment
-
-### SLURM Cluster Deployment
-
-For HPC environments with SLURM:
+### SLURM
 
 ```bash
-# Generate data on cluster
 sbatch slurm/generate_synthetic_data.slurm
-
-# Train model
 sbatch slurm/train_smolVLM.slurm
 ```
-
-**SLURM Configuration:**
-- GPU: A100 (1 GPU)
-- Memory: 32GB
-- CPUs: 8 cores
-- Time: 50 hours
-- Modules: CUDA 12.6, Python 3.13
 
 ### Code Quality
 
 ```bash
-# Install pre-commit hooks
 pre-commit install
-
-# Run manually
 pre-commit run --all-files
 ```
 
-**Pre-commit Checks:**
-- Code formatting (Ruff)
-- Linting (Ruff)
-- YAML/JSON validation
-- Trailing whitespace removal
-- End-of-file fixes
+## Language Adaptation
 
-## Language Adaptation Guide
+1. **Prepare corpus**: HuggingFace dataset or local files
+2. **Select fonts**: Use `language_code` parameter for automatic font filtering
+3. **Generate data**: `python scripts/prepare_data.py dataset_path=... language_code=de`
+4. **Fine-tune**: `python scripts/smol_vlm_ft.py hf_dataset_id=...`
+5. **Evaluate**: `python scripts/webui.py`
 
-The pipeline is designed to be language-agnostic. Here's how to adapt it for a new language:
+For non-Latin scripts: ensure Unicode font support, consider larger image sizes.
 
-### Step 1: Prepare Text Corpus
+## Troubleshooting
 
-**Option A: Use HuggingFace Dataset**
-```bash
-# Dataset should have a text column
-python scripts/prepare_data.py \
-  dataset_path=organization/dataset-name \
-  text_column=text
-```
+**No compatible fonts found**
+- Install fonts for your language
+- Use `font_path=/path/to/font.ttf` directly
+- Use `language_code=your_code`
 
-**Option B: Local Text Files**
-1. Create HuggingFace dataset from local files
-2. Upload to Hub or use locally
-
-### Step 2: Font Selection
-
-Ensure fonts support your language's special characters:
-
-**Method 1: Modify Font Checker**
-
-Edit `scripts/prepare_data.py:62`:
-```python
-# Replace Icelandic characters with your language
-test_chars = "ÁáÐðÉé..."  # Your special characters
-```
-
-**Method 2: Specify Font Path**
-```bash
-python scripts/prepare_data.py \
-  font_path=/path/to/font.ttf \
-  use_random_fonts=False
-```
-
-### Step 3: Generate Synthetic Data
-
-```bash
-python scripts/prepare_data.py \
-  dataset_path=your/language-corpus \
-  text_column=text \
-  max_entries=10000 \
-  use_random_fonts=True \
-  use_random_backgrounds=True \
-  local_output_dir=./language_ocr_data
-```
-
-### Step 4: Fine-tune Model
-
-```bash
-python scripts/smol_vlm_ft.py \
-  hf_dataset_id=your/language_ocr_data \
-  model_id=HuggingFaceTB/SmolVLM-Base \
-  num_train_epochs=3
-```
-
-### Step 5: Evaluate & Iterate
-
-1. Test with web UI: `python scripts/webui.py`
-2. Review metrics in Weights & Biases
-3. Adjust data generation parameters if needed
-4. Generate more data or train longer
-
-### Tips for Non-Latin Scripts
-
-- Ensure fonts have proper Unicode support
-- May need larger image sizes: `image_width=768 image_height=1024`
-- Consider right-to-left (RTL) layouts (may need code modifications)
-- Test with real scanned documents early
-
-## Technical Decisions & Architecture
-
-### Why Synthetic Data?
-
-**Problem:** Most languages lack large paired image-text datasets for OCR training.
-
-**Solution:** Generate unlimited synthetic data from text-only corpora.
-
-**Benefits:**
-- No manual annotation required
-- Perfect ground truth labels
-- Control over data distribution
-- Easy to balance rare characters/words
-
-### Why LoRA Fine-tuning?
-
-**Alternative:** Full fine-tuning requires 100x more GPU memory and time.
-
-**LoRA Advantages:**
-- Train only 0.1-1% of parameters
-- Much faster convergence
-- Easier to experiment with hyperparameters
-- Can merge multiple adapters
-
-### Why Multiprocessing?
-
-Image generation is CPU-bound (rendering, transformations).
-
-**ProcessPoolExecutor** bypasses Python's GIL for true parallelism, utilizing all CPU cores efficiently.
-
-### Why Column Layouts?
-
-Real documents often use multi-column layouts (newspapers, academic papers, magazines).
-
-**Benefits:**
-- More realistic training data
-- Tests model's layout understanding
-- Produces more varied images from same text
-
-### Why Bounding Boxes?
-
-Tracks paragraph locations even after transformations.
-
-**Future Applications:**
-- Layout analysis
-- Text segmentation
-- Region-based extraction
-- Document understanding tasks
-
-### Why Multiple Transformations?
-
-Simulates real-world document capture variations.
-
-**Robustness:** Model learns to handle:
-- Camera angles
-- Lighting variations
-- Aging and stains
-- Scanning artifacts
-- Rotation and skew
-
-## Project Philosophy
-
-1. **Data Efficiency** - Generate unlimited training data from text-only sources
-2. **Language Agnostic** - No language-specific assumptions in pipeline
-3. **Realistic Synthesis** - Extensive transformations for robust models
-4. **Parameter Efficiency** - LoRA adapters minimize training costs
-5. **Reproducibility** - Comprehensive logging and configuration management
-6. **Modularity** - Easy to customize and extend components
-
-## Common Issues & Solutions
-
-### Issue: No compatible fonts found
-
-**Solution:**
-- Install fonts supporting your language
-- Specify font path directly: `font_path=/path/to/font.ttf`
-- Use `use_random_fonts=False`
-
-### Issue: Out of memory during training
-
-**Solutions:**
-- Reduce batch size: `per_device_train_batch_size=4`
+**Out of memory during training**
+- Reduce `per_device_train_batch_size`
 - Use QLoRA: `load_in_4bit=True`
-- Enable gradient checkpointing (already enabled)
-- Reduce LoRA rank: `lora_r=16`
+- Reduce `lora_r`
 
-### Issue: Generated images look unrealistic
+**Images look unrealistic**
+- Enable `use_background_images=True`
+- Enable `use_paper_textures=True`
+- Increase `paper_texture_probability`
 
-**Solutions:**
-- Enable random backgrounds: `use_random_backgrounds=True`
-- Enable random fonts: `use_random_fonts=True`
-- Uncomment transformation selection in `transformations.py:348-365`
-- Adjust font size for image dimensions
+**Text doesn't fit**
+- Increase `image_width`/`image_height`
+- Reduce `font_size` or `max_text_length`
+- Adjust `column_range`
 
-### Issue: Text doesn't fit in image
+**Snapshot tests failing**
+- Review differences carefully
+- If intentional: `pytest ... --snapshot-update`
+- If unintended: fix bug and re-run
 
-**Solutions:**
-- Increase image size: `image_width=768 image_height=1024`
-- Reduce font size: `font_size=10`
-- Reduce max_text_length: `max_text_length=1500`
-- Adjust column count: `column_range="(1,3)"`
+**Datasets not reproducible**
+- Always use `random_seed=42` parameter
 
-## Future Enhancement Ideas
-
-Potential areas for development:
-
-1. **Layout Diversity**
-   - Tables and figures
-   - Headers and footers
-   - Bullet lists and numbered lists
-   - Mixed text and graphics
-
-2. **Advanced Transformations**
-   - Realistic scanning noise
-   - Compression artifacts
-   - Watermarks
-   - Handwritten annotations
-
-3. **Multi-language Support**
-   - Code-switching within documents
-   - Multi-script documents
-   - Right-to-left languages
-
-4. **Evaluation Framework**
-   - Automated testing on real documents
-   - Benchmark dataset creation
-   - Continuous evaluation pipeline
-
-5. **Model Improvements**
-   - Experiment with other VLMs
-   - Ensemble methods
-   - Active learning for hard examples
+**Font cache outdated**
+- Delete `.fontcache/` and regenerate
 
 ## Conventions
-* Use uv for dependency and environment management
+
+- Use `uv` for dependency management
+- Use `pytest` for testing
+- Follow PEP 8 (enforced by pre-commit)
+- All random operations use centralized `randomness` module
+- Document line numbers as `file.py:123` format
