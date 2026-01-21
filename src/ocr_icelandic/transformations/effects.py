@@ -67,6 +67,8 @@ def textured_stains(
 ) -> tuple[Image.Image, dict[str, Any], list[dict[str, Any]]]:
     """Apply coffee/tea stain textures using multiply blending.
 
+    Places a random number of stains (1-5), each randomly rotated and scaled.
+
     Args:
         image: Input image
         bg_color: Background color (unused, kept for API consistency)
@@ -78,90 +80,118 @@ def textured_stains(
     logger.debug("Applying textured stains transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    texture = randomness.choice(stain_textures)
-    logger.debug("Using stain texture: %s", texture)
-    stain = Image.open(texture).convert("RGBA")
-    # Adjust scale factor to ensure stain fits within image
-    max_scale = min(image.width / stain.width, image.height / stain.height) * 0.8
-    scale_factor = randomness.uniform(0.5, min(1.5, max_scale))
-    new_size = (int(stain.width * scale_factor), int(stain.height * scale_factor))
-    stain = stain.resize(new_size, Image.Resampling.LANCZOS)
-
-    # Reduce opacity to 80%
-    alpha = stain.split()[3]
-    alpha = alpha.point(lambda p: int(p * 0.8))
-    stain.putalpha(alpha)
-
-    # Apply edge gradient for smooth transition at boundaries
-    # Create a distance-from-edge mask that fades to transparency
-    stain_w, stain_h = stain.size
-    edge_fade_size = int(min(stain_w, stain_h) * 0.15)  # 15% of smaller dimension
-
-    if edge_fade_size > 0:
-        # Create coordinate arrays for distance calculation
-        y_coords, x_coords = np.ogrid[:stain_h, :stain_w]
-
-        # Calculate distance from each edge
-        dist_left = x_coords
-        dist_right = stain_w - 1 - x_coords
-        dist_top = y_coords
-        dist_bottom = stain_h - 1 - y_coords
-
-        # Minimum distance to any edge
-        dist_to_edge = np.minimum(
-            np.minimum(dist_left, dist_right), np.minimum(dist_top, dist_bottom)
-        )
-
-        # Create gradient: 0 at edge, 1 at edge_fade_size distance
-        edge_gradient = np.clip(dist_to_edge / edge_fade_size, 0, 1).astype(np.float32)
-
-        # Apply smooth easing (ease-in-out) for more natural transition
-        edge_gradient = edge_gradient * edge_gradient * (3 - 2 * edge_gradient)
-
-        # Apply gradient to existing alpha channel
-        alpha_array = np.array(stain.split()[3], dtype=np.float32)
-        alpha_array = alpha_array * edge_gradient
-        stain.putalpha(Image.fromarray(alpha_array.astype(np.uint8)))
-
-    # Allow stain to be positioned partially outside image bounds
-    pos_x = randomness.randint(-stain.width // 2, image.width - stain.width // 2)
-    pos_y = randomness.randint(-stain.height // 2, image.height - stain.height // 2)
-
     # Ensure image is RGBA
     if image.mode != "RGBA":
         image = image.convert("RGBA")
 
-    # Apply multiply blending for more realistic stain effect
-    # Multiply blend: result = (paper * stain) / 255
-    # This makes stains naturally darken the paper while texture shows through
     img_array = np.array(image, dtype=np.float32)
 
-    # Create a full-size stain layer with white (neutral for multiply) background
+    # Create full-size stain layer with white (neutral for multiply) background
     stain_layer = np.ones((image.height, image.width, 4), dtype=np.float32) * 255.0
     stain_alpha_layer = np.zeros((image.height, image.width), dtype=np.float32)
 
-    # Calculate the region where stain overlaps with image
-    stain_x1 = max(0, pos_x)
-    stain_y1 = max(0, pos_y)
-    stain_x2 = min(image.width, pos_x + stain.width)
-    stain_y2 = min(image.height, pos_y + stain.height)
+    # Determine number of stains to apply (1-5)
+    num_stains = randomness.randint(1, 5)
+    logger.debug("Applying %d stains", num_stains)
 
-    # Corresponding region in stain texture
-    tex_x1 = max(0, -pos_x)
-    tex_y1 = max(0, -pos_y)
-    tex_x2 = tex_x1 + (stain_x2 - stain_x1)
-    tex_y2 = tex_y1 + (stain_y2 - stain_y1)
+    stains_metadata = []
 
-    # Get stain data as numpy
-    stain_array = np.array(stain, dtype=np.float32)
+    for stain_idx in range(num_stains):
+        texture = randomness.choice(stain_textures)
+        texture_name = str(texture.name) if hasattr(texture, "name") else str(texture)
+        logger.debug("Using stain texture %d: %s", stain_idx + 1, texture)
+        stain = Image.open(texture).convert("RGBA")
 
-    # Copy stain RGB and alpha to full-size layers
-    if stain_x2 > stain_x1 and stain_y2 > stain_y1:
-        stain_layer[stain_y1:stain_y2, stain_x1:stain_x2, :3] = stain_array[
-            tex_y1:tex_y2, tex_x1:tex_x2, :3
-        ]
-        stain_alpha_layer[stain_y1:stain_y2, stain_x1:stain_x2] = (
-            stain_array[tex_y1:tex_y2, tex_x1:tex_x2, 3] / 255.0
+        # Rotate randomly (0-360 degrees)
+        rotation_angle = randomness.uniform(0, 360)
+        stain = stain.rotate(
+            rotation_angle, expand=True, resample=Image.Resampling.BICUBIC
+        )
+
+        # Adjust scale factor to ensure stain fits within image (1-2x range)
+        max_scale = min(image.width / stain.width, image.height / stain.height) * 0.8
+        scale_factor = randomness.uniform(1.0, max(1.0, min(2.0, max_scale)))
+        new_size = (int(stain.width * scale_factor), int(stain.height * scale_factor))
+        stain = stain.resize(new_size, Image.Resampling.LANCZOS)
+
+        # Reduce opacity to 80%
+        alpha = stain.split()[3]
+        alpha = alpha.point(lambda p: int(p * 0.8))
+        stain.putalpha(alpha)
+
+        # Apply edge gradient for smooth transition at boundaries
+        stain_w, stain_h = stain.size
+        edge_fade_size = int(min(stain_w, stain_h) * 0.25)  # 25% of smaller dimension
+
+        if edge_fade_size > 0:
+            # Create coordinate arrays for distance calculation
+            y_coords, x_coords = np.ogrid[:stain_h, :stain_w]
+
+            # Calculate distance from each edge
+            dist_left = x_coords
+            dist_right = stain_w - 1 - x_coords
+            dist_top = y_coords
+            dist_bottom = stain_h - 1 - y_coords
+
+            # Minimum distance to any edge
+            dist_to_edge = np.minimum(
+                np.minimum(dist_left, dist_right), np.minimum(dist_top, dist_bottom)
+            )
+
+            # Create gradient: 0 at edge, 1 at edge_fade_size distance
+            edge_gradient = np.clip(dist_to_edge / edge_fade_size, 0, 1).astype(
+                np.float32
+            )
+
+            # Apply smooth easing (ease-in-out) for more natural transition
+            edge_gradient = edge_gradient * edge_gradient * (3 - 2 * edge_gradient)
+
+            # Apply gradient to existing alpha channel
+            alpha_array = np.array(stain.split()[3], dtype=np.float32)
+            alpha_array = alpha_array * edge_gradient
+            stain.putalpha(Image.fromarray(alpha_array.astype(np.uint8)))
+
+        # Allow stain to be positioned partially outside image bounds
+        pos_x = randomness.randint(-stain.width // 2, image.width - stain.width // 2)
+        pos_y = randomness.randint(-stain.height // 2, image.height - stain.height // 2)
+
+        # Calculate the region where stain overlaps with image
+        stain_x1 = max(0, pos_x)
+        stain_y1 = max(0, pos_y)
+        stain_x2 = min(image.width, pos_x + stain.width)
+        stain_y2 = min(image.height, pos_y + stain.height)
+
+        # Corresponding region in stain texture
+        tex_x1 = max(0, -pos_x)
+        tex_y1 = max(0, -pos_y)
+        tex_x2 = tex_x1 + (stain_x2 - stain_x1)
+        tex_y2 = tex_y1 + (stain_y2 - stain_y1)
+
+        # Get stain data as numpy
+        stain_array = np.array(stain, dtype=np.float32)
+
+        # Accumulate stain RGB and alpha to full-size layers
+        if stain_x2 > stain_x1 and stain_y2 > stain_y1:
+            # For RGB: multiply existing stain_layer with new stain (accumulate stains)
+            stain_layer[stain_y1:stain_y2, stain_x1:stain_x2, :3] = (
+                stain_layer[stain_y1:stain_y2, stain_x1:stain_x2, :3]
+                * stain_array[tex_y1:tex_y2, tex_x1:tex_x2, :3]
+                / 255.0
+            )
+            # For alpha: use max to accumulate (any stain present = stained)
+            new_alpha = stain_array[tex_y1:tex_y2, tex_x1:tex_x2, 3] / 255.0
+            stain_alpha_layer[stain_y1:stain_y2, stain_x1:stain_x2] = np.maximum(
+                stain_alpha_layer[stain_y1:stain_y2, stain_x1:stain_x2], new_alpha
+            )
+
+        stains_metadata.append(
+            {
+                "texture": texture_name,
+                "position": (pos_x, pos_y),
+                "scale_factor": round(scale_factor, 2),
+                "rotation_angle": round(rotation_angle, 1),
+                "edge_fade_size": edge_fade_size,
+            }
         )
 
     # Apply multiply blend for RGB channels
@@ -185,10 +215,9 @@ def textured_stains(
         combined,
         {
             "transformation": "coffee_stains",
-            "position": (pos_x, pos_y),
-            "scale_factor": round(scale_factor, 2),
+            "num_stains": num_stains,
+            "stains": stains_metadata,
             "blend_mode": "multiply",
-            "edge_fade_size": edge_fade_size,
         },
         paragraph_bboxes_copy,
     )
@@ -350,10 +379,14 @@ def paper_edge_unevenness(
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # Parameters for light edge unevenness
-    max_deviation = randomness.randint(1, 5)  # Small deviations for subtle effect
-    num_points = randomness.randint(10, 20)  # Control points per edge
-
     width, height = image.size
+
+    min_dimension = min(width, height)
+
+    max_deviation = randomness.randint(
+        1, round(min_dimension * 0.02)
+    )  # Small deviations for subtle effect
+    num_points = randomness.randint(10, 20)  # Control points per edge
 
     # Generate wavy edge points for each edge
     def generate_edge_points(
