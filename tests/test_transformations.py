@@ -152,8 +152,18 @@ class TestContentTransformations:
         _, metadata, _ = result
 
         assert metadata["transformation"] == "coffee_stains"
-        assert "position" in metadata
-        assert "scale_factor" in metadata
+        assert "num_stains" in metadata
+        assert 1 <= metadata["num_stains"] <= 5
+        assert "stains" in metadata
+        assert len(metadata["stains"]) == metadata["num_stains"]
+
+        # Check each stain has the expected metadata
+        for stain_meta in metadata["stains"]:
+            assert "position" in stain_meta
+            assert "scale_factor" in stain_meta
+            assert "rotation_angle" in stain_meta
+            assert 1.0 <= stain_meta["scale_factor"] <= 2.0
+            assert 0 <= stain_meta["rotation_angle"] <= 360
 
         result[0].save("local_output/transformations/test_textured_stains.png")
 
@@ -178,7 +188,9 @@ class TestPerspectiveTransformations:
         transformed_img, metadata, transformed_bboxes, transformed_bg = result
 
         # Validate image
-        assert isinstance(transformed_img, Image.Image), "First element should be PIL Image"
+        assert isinstance(transformed_img, Image.Image), (
+            "First element should be PIL Image"
+        )
         assert transformed_img.size == image.size, "Image size should be preserved"
 
         # Validate metadata
@@ -188,7 +200,9 @@ class TestPerspectiveTransformations:
         assert -5 <= metadata["angle"] <= 5
 
         # Verify bboxes were transformed
-        assert isinstance(transformed_bboxes, list), "Third element should be list of bboxes"
+        assert isinstance(transformed_bboxes, list), (
+            "Third element should be list of bboxes"
+        )
         assert len(transformed_bboxes) == len(bboxes)
 
         # Validate background (should be None when no background provided)
@@ -312,7 +326,9 @@ class TestApplyRandomTransformation:
         assert isinstance(result, tuple)
         assert len(result) == 4, "apply_random_transformation should return 4 elements"
 
-        transformed_img, transformation_metadata, transformed_bboxes, transformed_bg = result
+        transformed_img, transformation_metadata, transformed_bboxes, transformed_bg = (
+            result
+        )
 
         # Validate image
         assert isinstance(transformed_img, Image.Image)
@@ -346,7 +362,9 @@ class TestApplyRandomTransformation:
         assert isinstance(result, tuple)
         assert len(result) == 4, "apply_random_transformation should return 4 elements"
 
-        transformed_img, transformation_metadata, transformed_bboxes, transformed_bg = result
+        transformed_img, transformation_metadata, transformed_bboxes, transformed_bg = (
+            result
+        )
 
         # Validate outputs
         assert isinstance(transformed_img, Image.Image)
