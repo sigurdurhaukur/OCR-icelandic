@@ -68,6 +68,10 @@ class DataConfig:
     font_size_min_ratio: float = 0.9
     font_size_max_ratio: float = 1.1
 
+    # Bounding box settings
+    bbox_per_column: bool = True  # Split bboxes at column boundaries
+    bbox_max_chars: int | None = None  # Max characters per bbox (None = unlimited)
+
     # Output settings
     local_output_dir: str = "./local_output"
     save_to_disk: bool = False

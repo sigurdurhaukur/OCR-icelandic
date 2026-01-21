@@ -1,5 +1,7 @@
 """Main image creation functionality for OCR training data."""
 
+from dataclasses import dataclass, field
+
 from PIL import Image, ImageDraw
 
 from ocr_icelandic.logging_config import get_logger
@@ -20,6 +22,59 @@ from ocr_icelandic.utils.texture import (
 )
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class _BboxBuilder:
+    """Helper to incrementally build a bounding box with splitting logic."""
+
+    paragraph_index: int
+    sequence_number: int  # 0, 1, 2, ... for split bboxes
+    paragraph_text: str  # Full paragraph text (same for all splits)
+    columns: set[int] = field(default_factory=set)
+    char_count: int = 0
+    bbox_coords: list[int] | None = None
+
+    def add_line(self, line_bbox: list[int], column: int, line_char_count: int) -> None:
+        """Add a line to this bbox."""
+        self.columns.add(column)
+        self.char_count += line_char_count
+
+        if self.bbox_coords is None:
+            self.bbox_coords = list(line_bbox)
+        else:
+            # Union with existing bbox
+            self.bbox_coords[0] = min(self.bbox_coords[0], line_bbox[0])
+            self.bbox_coords[1] = min(self.bbox_coords[1], line_bbox[1])
+            self.bbox_coords[2] = max(self.bbox_coords[2], line_bbox[2])
+            self.bbox_coords[3] = max(self.bbox_coords[3], line_bbox[3])
+
+    def should_split_for_column(self, new_column: int, bbox_per_column: bool) -> bool:
+        """Check if we should split bbox due to column change."""
+        if not bbox_per_column:
+            return False
+        return len(self.columns) > 0 and new_column not in self.columns
+
+    def should_split_for_chars(
+        self, new_char_count: int, bbox_max_chars: int | None
+    ) -> bool:
+        """Check if adding new chars would exceed limit."""
+        if bbox_max_chars is None:
+            return False
+        return (
+            self.char_count > 0 and (self.char_count + new_char_count) > bbox_max_chars
+        )
+
+    def to_dict(self) -> dict:
+        """Convert to final output format."""
+        return {
+            "paragraph_index": self.paragraph_index,
+            "sequence_number": self.sequence_number,
+            "paragraph_text": self.paragraph_text,
+            "columns": sorted(self.columns),
+            "char_count": self.char_count,
+            "bbox": self.bbox_coords if self.bbox_coords else [0, 0, 0, 0],
+        }
 
 
 def create_image_with_text(
@@ -43,6 +98,8 @@ def create_image_with_text(
     displacement_lighting: bool = True,
     paragraph_font_configs: list[ParagraphFontConfig] | None = None,
     add_noise: bool = True,
+    bbox_per_column: bool = False,
+    bbox_max_chars: int | None = None,
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -310,7 +367,11 @@ def create_image_with_text(
     text_mask = Image.new("L", scaled_image_size, color=0)
     mask_draw = ImageDraw.Draw(text_mask)
 
-    paragraph_bboxes_map: dict[int, dict] = {}
+    # NEW: Use list to support multiple bboxes per paragraph
+    bbox_builders: list[_BboxBuilder] = []
+    current_builder_map: dict[
+        int, _BboxBuilder
+    ] = {}  # paragraph_index -> current builder
     actual_text_lines: list[str] = []
 
     # Track current font and config to avoid redundant lookups
@@ -377,29 +438,80 @@ def create_image_with_text(
                 width=1,
             )
 
+        # === NEW BBOX LOGIC WITH SPLITTING ===
         paragraph_index = placement.paragraph_index
         if paragraph_index is None:
             continue
 
-        current_bbox = paragraph_bboxes_map.get(paragraph_index)
+        # Calculate line bbox - include font offsets from textbbox
+        # textbbox returns (left, top, right, bottom) relative to anchor point
+        # which can have negative offsets for ascenders/descenders
         line_bbox = [
-            x_position_int,
-            y_position_int,
-            x_position_int + line_width,
-            y_position_int + line_height_local,
+            x_position_int + bbox[0],
+            y_position_int + bbox[1],
+            x_position_int + bbox[2],
+            y_position_int + bbox[3],
         ]
-        if current_bbox:
-            x0 = min(current_bbox["bbox"][0], line_bbox[0])
-            y0 = min(current_bbox["bbox"][1], line_bbox[1])
-            x1 = max(current_bbox["bbox"][2], line_bbox[2])
-            y1 = max(current_bbox["bbox"][3], line_bbox[3])
-            current_bbox["bbox"] = [x0, y0, x1, y1]
-        else:
-            paragraph_bboxes_map[paragraph_index] = {
-                "paragraph_text": wrapped_paragraphs[paragraph_index].text,
-                "column": placement.column_index,
-                "bbox": line_bbox,
-            }
+
+        # Count characters in this line (excluding whitespace-only)
+        line_char_count = len(placement.text.strip())
+
+        # Get current builder for this paragraph
+        current_builder = current_builder_map.get(paragraph_index)
+
+        # Determine if we need to split
+        need_split = False
+        if current_builder is not None:
+            # Check column-based split
+            if current_builder.should_split_for_column(
+                placement.column_index, bbox_per_column
+            ):
+                need_split = True
+                logger.debug(
+                    "Splitting bbox for paragraph %d: column change %s -> %d",
+                    paragraph_index,
+                    current_builder.columns,
+                    placement.column_index,
+                )
+
+            # Check character-based split
+            elif current_builder.should_split_for_chars(
+                line_char_count, bbox_max_chars
+            ):
+                need_split = True
+                logger.debug(
+                    "Splitting bbox for paragraph %d: char limit %d + %d > %d",
+                    paragraph_index,
+                    current_builder.char_count,
+                    line_char_count,
+                    bbox_max_chars,
+                )
+
+        # Create new builder if needed
+        if current_builder is None or need_split:
+            # Determine sequence number
+            if current_builder is None:
+                sequence_number = 0
+            else:
+                sequence_number = current_builder.sequence_number + 1
+
+            # Create new builder
+            new_builder = _BboxBuilder(
+                paragraph_index=paragraph_index,
+                sequence_number=sequence_number,
+                paragraph_text=wrapped_paragraphs[paragraph_index].text,
+            )
+
+            # Add previous builder to final list if it exists
+            if current_builder is not None:
+                bbox_builders.append(current_builder)
+
+            # Set as current builder
+            current_builder_map[paragraph_index] = new_builder
+            current_builder = new_builder
+
+        # Add line to current builder
+        current_builder.add_line(line_bbox, placement.column_index, line_char_count)
 
     # Apply blending mode to combine text with background
     # Convert font_color to RGB tuple
@@ -440,10 +552,12 @@ def create_image_with_text(
 
     actual_text = "\n".join(actual_text_lines)
 
-    paragraph_bboxes = [
-        {"paragraph_index": idx, **data}
-        for idx, data in sorted(paragraph_bboxes_map.items())
-    ]
+    # Add remaining builders to final list
+    for builder in current_builder_map.values():
+        bbox_builders.append(builder)
+
+    # Convert builders to final format
+    paragraph_bboxes = [builder.to_dict() for builder in bbox_builders]
 
     logger.debug(
         "Image creation complete: %d bounding boxes, %d text lines",

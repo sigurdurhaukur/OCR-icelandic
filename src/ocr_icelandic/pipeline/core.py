@@ -43,6 +43,10 @@ class PipelineState:
     alignment: str = "left"
     vertical_alignment: str = "center"
 
+    # Bounding box settings
+    bbox_per_column: bool = False
+    bbox_max_chars: int | None = None
+
     # Font variation settings
     paragraph_font_configs: list | None = None
 

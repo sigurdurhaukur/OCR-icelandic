@@ -60,6 +60,8 @@ class RenderTextStage(BaseStage):
             displacement_strength=self.displacement_strength,
             displacement_lighting=self.displacement_lighting,
             paragraph_font_configs=state.paragraph_font_configs,
+            bbox_per_column=state.bbox_per_column,
+            bbox_max_chars=state.bbox_max_chars,
         )
 
         state.image = image
