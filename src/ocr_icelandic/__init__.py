@@ -23,7 +23,7 @@ from ocr_icelandic.pipeline import (
 )
 from ocr_icelandic.colors import get_contrasting_font_color, get_random_background_color
 from ocr_icelandic.config import DataConfig, GenerationConfig, SingleImageData
-from ocr_icelandic.image_generator import generate_single_text
+from ocr_icelandic.image_generator import generate_single_chunk, generate_single_text
 from ocr_icelandic.text_processing import normalize_range, split_long_text
 
 __version__ = "0.2.0"
@@ -55,5 +55,6 @@ __all__ = [
     "split_long_text",
     "normalize_range",
     # Image generation
+    "generate_single_chunk",
     "generate_single_text",
 ]

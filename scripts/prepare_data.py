@@ -51,7 +51,14 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import cast
 
-from datasets import Dataset, DatasetDict, Image
+from datasets import (
+    Dataset,
+    DatasetDict,
+    Image,
+    concatenate_datasets,
+    load_dataset,
+    load_from_disk,
+)
 
 from ocr_icelandic import randomness
 from ocr_icelandic.fonts import (
@@ -59,19 +66,14 @@ from ocr_icelandic.fonts import (
     sync_google_fonts,
 )
 from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
-
-from datasets import (
-    concatenate_datasets,
-    load_dataset,
-    load_from_disk,
-)
 from omegaconf import OmegaConf
 from PIL import Image as PILImage
 from rich.logging import RichHandler
 from tqdm import tqdm
 
 from ocr_icelandic.config import DataConfig, GenerationConfig, SingleImageData
-from ocr_icelandic.image_generator import generate_single_text
+from ocr_icelandic.image_generator import generate_single_chunk
+from ocr_icelandic.text_processing import split_long_text
 
 logging.basicConfig(
     level=logging.INFO,
@@ -95,47 +97,6 @@ def _save_batch_to_disk(new_data: dict, batch_dir: Path, batch_idx: int) -> str:
     except Exception as e:
         logger.error("Failed to save batch %d to disk: %s", batch_idx, e)
         raise
-
-
-def split_long_text(text: str, max_length: int) -> list[str]:
-    """
-    Split text into chunks at sentence boundaries to avoid mid-sentence splits.
-
-    Args:
-        text: The text to split
-        max_length: Maximum length for each chunk
-
-    Returns:
-        List of text chunks
-    """
-    if len(text) <= max_length:
-        return [text]
-
-    chunks = []
-    # Split on sentence boundaries
-    sentences = (
-        text.replace("! ", "!|").replace("? ", "?|").replace(". ", ".|").split("|")
-    )
-
-    current_chunk = ""
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
-            continue
-
-        # If adding this sentence exceeds max_length, save current chunk and start new one
-        if len(current_chunk) + len(sentence) + 1 > max_length:
-            if current_chunk:
-                chunks.append(current_chunk.strip())
-            current_chunk = sentence
-        else:
-            current_chunk += (" " if current_chunk else "") + sentence
-
-    # Add the last chunk
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-
-    return chunks
 
 
 def _setup_fonts(cfg: DataConfig) -> list[str] | None:
@@ -235,6 +196,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     """
     Generate a dataset with images from text using batch processing.
 
+    Parallelization happens at the chunk level for better CPU utilization:
+    texts are first split into chunks, then all chunks are processed in parallel.
+
     Args:
         texts: List of text entries to convert to images
         cfg: Configuration for image generation
@@ -255,38 +219,59 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
         cfg, fonts, paper_textures, no_shadow_bgs, with_shadow_bgs
     )
 
+    # Phase 1: Split all texts into chunks (fast, sequential)
+    # This ensures parallelization happens at the chunk level for better CPU utilization
+    all_chunks: list[str] = []
+    split_texts = 0
+    for text in texts[:num_examples]:
+        chunks = split_long_text(text.strip(), cfg.max_text_length)
+        all_chunks.extend(chunks)
+        if len(chunks) > 1:
+            split_texts += 1
+
+    logger.info(
+        "Split %d texts into %d chunks (%d texts required splitting).",
+        num_examples,
+        len(all_chunks),
+        split_texts,
+    )
+
     # Batch processing setup
     batch_dir = Path(cfg.local_output_dir) / "_batches"
     batch_dir.mkdir(parents=True, exist_ok=True)
     batch_datasets: list[str] = []
     new_data: defaultdict[str, list] = defaultdict(list)
     batch_idx = 0
-    total_splits = 0
-    split_texts = 0
 
-    max_workers = min(cfg.max_workers, len(texts[:num_examples]))
+    # Scale workers with chunk count, not text count
+    max_workers = min(cfg.max_workers, len(all_chunks))
     logger.info(
-        "Using %d parallel workers for image generation (batch_size=%d).",
+        "Using %d parallel workers for %d chunks (batch_size=%d).",
         max_workers,
+        len(all_chunks),
         cfg.batch_size,
     )
 
+    # Phase 2: Process all chunks in parallel
+    # Each worker gets a unique seed derived from base_seed + chunk_index
+    # to ensure different random choices across workers
+    base_seed = cfg.random_seed
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         futures = {
-            executor.submit(generate_single_text, text, generation_cfg): text
-            for text in texts[:num_examples]
+            executor.submit(
+                generate_single_chunk, chunk, generation_cfg, base_seed + i
+            ): i
+            for i, chunk in enumerate(all_chunks)
         }
 
         for future in tqdm(
             as_completed(futures),
             total=len(futures),
-            desc="Processing texts",
-            unit="text",
+            desc="Processing chunks",
+            unit="chunk",
         ):
             try:
-                image_data_list, num_splits = future.result()
-                total_splits += num_splits
-                split_texts += 1 if num_splits > 1 else 0
+                image_data_list = future.result()
 
                 for image_data in image_data_list:
                     _process_image_data(image_data, cfg.text_column, new_data)
@@ -305,7 +290,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     gc.collect()
 
             except (OSError, ValueError, RuntimeError) as e:
-                logger.error("Error processing text: %s", e)
+                logger.error("Error processing chunk: %s", e)
                 continue
 
     # Save remaining data
@@ -321,9 +306,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
         gc.collect()
 
     logger.info(
-        "Split %d long texts into multiple chunks, generating %d batches.",
-        split_texts,
+        "Generated %d batches from %d chunks.",
         len(batch_datasets),
+        len(all_chunks),
     )
 
     # Concatenate batches
@@ -396,7 +381,7 @@ def create_image_dataset(cfg: DataConfig) -> None:
         Dataset,
         load_dataset(
             cfg.dataset_path,
-            cfg.data_directory if hasattr(cfg, "data_directory") else None,
+            cfg.data_directory,
             split=cfg.split,
             cache_dir=".cache/huggingface/datasets",
             download_mode="reuse_cache_if_exists",

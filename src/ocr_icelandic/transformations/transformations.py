@@ -34,10 +34,6 @@ from ocr_icelandic.transformations.pipeline import (
     apply_random_transformation,
 )
 
-from ocr_icelandic.logging_config import get_logger
-
-logger = get_logger(__name__)
-
 __all__ = [
     # Effects
     "blur",

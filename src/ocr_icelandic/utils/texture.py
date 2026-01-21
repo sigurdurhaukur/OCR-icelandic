@@ -39,33 +39,26 @@ def discover_paper_textures(papers_dir: str = "assets/papers") -> list[str]:
     return sorted(paper_paths)
 
 
-def _tile_texture_seamlessly(
+def _scale_texture_to_size(
     texture: Image.Image,
     target_size: tuple[int, int],
     random_offset: bool = True,
-    blend_edges: bool = True,
-    edge_blend_width: int = 25,
 ) -> Image.Image:
     """
-    Tile texture to fill target size with seamless edges.
-
-    Uses mirror tiling (flip alternating tiles) and edge blending
-    to minimize visible seams at tile boundaries.
+    Scale texture to target size, or crop with random offset if larger.
 
     Args:
-        texture: Source texture to tile
+        texture: Source texture to scale
         target_size: (width, height) of target image
-        random_offset: Apply random offset for variety
-        blend_edges: Apply Gaussian blending at tile boundaries
-        edge_blend_width: Width of edge blend in pixels
+        random_offset: Apply random offset when cropping larger textures
 
     Returns:
-        Tiled texture matching target_size
+        Texture scaled/cropped to target_size
     """
     target_width, target_height = target_size
     tex_width, tex_height = texture.size
 
-    # If texture is larger, just crop with random offset
+    # If texture is larger, crop with optional random offset
     if tex_width >= target_width and tex_height >= target_height:
         max_offset_x = max(0, tex_width - target_width)
         max_offset_y = max(0, tex_height - target_height)
@@ -83,83 +76,8 @@ def _tile_texture_seamlessly(
             (offset_x, offset_y, offset_x + target_width, offset_y + target_height)
         )
 
-    # Calculate tiles needed (add extra for random offset)
-    tiles_x = (target_width // tex_width) + 2
-    tiles_y = (target_height // tex_height) + 2
-
-    # Create tiled texture with mirror pattern to reduce repetition
-    tiled = Image.new(texture.mode, (tex_width * tiles_x, tex_height * tiles_y))
-    for i in range(tiles_x):
-        for j in range(tiles_y):
-            # Mirror flip alternating tiles (checkerboard pattern)
-            tile = texture
-            if (i + j) % 2 == 1:  # Alternate tiles
-                tile = texture.transpose(Image.FLIP_LEFT_RIGHT)
-            tiled.paste(tile, (i * tex_width, j * tex_height))
-
-    # Apply edge blending if enabled (smooth transitions at tile boundaries)
-    if blend_edges:
-        tiled = _apply_edge_blending(tiled, tex_width, tex_height, edge_blend_width)
-
-    # Crop to target size with random offset
-    max_offset_x = max(0, tiled.width - target_width)
-    max_offset_y = max(0, tiled.height - target_height)
-    offset_x = (
-        randomness.randint(0, max_offset_x) if random_offset and max_offset_x > 0 else 0
-    )
-    offset_y = (
-        randomness.randint(0, max_offset_y) if random_offset and max_offset_y > 0 else 0
-    )
-
-    return tiled.crop(
-        (offset_x, offset_y, offset_x + target_width, offset_y + target_height)
-    )
-
-
-def _apply_edge_blending(
-    tiled: Image.Image,
-    tile_width: int,
-    tile_height: int,
-    blend_width: int,
-) -> Image.Image:
-    """
-    Apply Gaussian blending at tile boundaries to hide seams.
-
-    Creates gradient masks at tile edges and applies localized blur
-    to smooth transitions between tiles.
-
-    Args:
-        tiled: Tiled texture image
-        tile_width: Width of individual tiles
-        tile_height: Height of individual tiles
-        blend_width: Width of edge blend in pixels
-
-    Returns:
-        Tiled texture with smoothed edges
-    """
-    # Create blend mask for vertical seams
-    for i in range(1, tiled.width // tile_width):
-        x = i * tile_width
-        if x < tiled.width - blend_width:
-            # Apply slight blur near seam
-            region = tiled.crop(
-                (x - blend_width // 2, 0, x + blend_width // 2, tiled.height)
-            )
-            blurred = region.filter(ImageFilter.GaussianBlur(radius=1.0))
-            tiled.paste(blurred, (x - blend_width // 2, 0))
-
-    # Create blend mask for horizontal seams
-    for j in range(1, tiled.height // tile_height):
-        y = j * tile_height
-        if y < tiled.height - blend_width:
-            # Apply slight blur near seam
-            region = tiled.crop(
-                (0, y - blend_width // 2, tiled.width, y + blend_width // 2)
-            )
-            blurred = region.filter(ImageFilter.GaussianBlur(radius=1.0))
-            tiled.paste(blurred, (0, y - blend_width // 2))
-
-    return tiled
+    # Scale texture to target size
+    return texture.resize(target_size, Image.Resampling.BICUBIC)
 
 
 def apply_paper_texture(
@@ -193,14 +111,12 @@ def apply_paper_texture(
         texture = Image.open(texture_path).convert("RGB")
         logger.debug("Loaded texture: %dx%d", texture.width, texture.height)
 
-        # Use seamless tiling for paper texture
+        # Scale texture to image size
         img_width, img_height = image.size
-        texture = _tile_texture_seamlessly(
+        texture = _scale_texture_to_size(
             texture,
             (img_width, img_height),
             random_offset=True,
-            blend_edges=True,
-            edge_blend_width=25,
         )
 
         # Convert to numpy arrays for processing
@@ -498,13 +414,11 @@ def texture_to_height_map(
     img_width, img_height = size
     logger.debug("Loaded texture for height map: %dx%d", texture.width, texture.height)
 
-    # Use seamless tiling for height map texture
-    texture = _tile_texture_seamlessly(
+    # Scale texture to target size
+    texture = _scale_texture_to_size(
         texture,
         size,
         random_offset=True,
-        blend_edges=True,
-        edge_blend_width=8,  # Slightly smaller for height maps
     )
 
     # Apply Gaussian blur for smooth gradients
