@@ -32,7 +32,7 @@ jobs:
 
     - name: Run tests
       run: |
-        uv run pytest tests/ -v --tb=short
+        uv run --frozen pytest tests/ -v --tb=short -n auto
 
     - name: Upload test artifacts
       if: always()

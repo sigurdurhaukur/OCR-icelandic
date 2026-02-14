@@ -6,17 +6,18 @@ Run with: pytest tests/test_transformation_snapshots.py
 Update snapshots: pytest tests/test_transformation_snapshots.py --snapshot-update
 """
 
-import io
 import random
+import io
 from typing import Any
-
-import pytest
 from PIL import Image
+import pytest
 from syrupy.assertion import SnapshotAssertion
 from syrupy.extensions.amber import AmberSnapshotExtension
 from syrupy.extensions.single_file import SingleFileSnapshotExtension, WriteMode
 
 from ocr_icelandic.utils import create_image_with_text
+from ocr_icelandic import randomness
+
 
 # ============================================================================
 # Custom Syrupy Extension for PIL Images
@@ -74,13 +75,13 @@ This ensures that the OCR model can learn proper text localization even after ge
     image, fitted_text, bboxes = create_image_with_text(
         text=text,
         image_size=(512, 512),
-        font_path="/System/Library/Fonts/Helvetica.ttc",
         font_size=14,
         num_columns=1,
         alignment="left",
         vertical_alignment="center",
         bg_color="white",
         font_color="black",
+        add_noise=False,
     )
     return image, fitted_text, bboxes
 
@@ -95,7 +96,6 @@ The transformation must preserve the relative positions of text across all colum
     image, fitted_text, bboxes = create_image_with_text(
         text=text,
         image_size=(600, 400),
-        font_path="/System/Library/Fonts/Helvetica.ttc",
         font_size=12,
         num_columns=2,
         column_gap=30,
@@ -103,6 +103,7 @@ The transformation must preserve the relative positions of text across all colum
         vertical_alignment="top",
         bg_color="white",
         font_color="black",
+        add_noise=False,
     )
     return image, fitted_text, bboxes
 
@@ -169,7 +170,7 @@ class TestRotateSnapshots:
         angle = 3.5
         from ocr_icelandic.transformations.rotate import _rotate_within_bounds
 
-        rotated_img, meta = _rotate_within_bounds(image, angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
 
         # Import transform function to get transformed bboxes
         from ocr_icelandic.transformations.rotate import (
@@ -199,7 +200,7 @@ class TestRotateSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
@@ -219,93 +220,10 @@ class TestRotateSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-
-# ============================================================================
-# Skew Transformation Snapshot Tests
-# ============================================================================
-
-
-class TestSkewSnapshots:
-    """Snapshot tests for skew transformation."""
-
-    def test_skew_positive_dx(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with positive horizontal displacement."""
-        image, _, bboxes = base_test_image
-
-        random.seed(42)
-        dx = 0.15
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_negative_dx(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with negative horizontal displacement."""
-        image, _, bboxes = base_test_image
-
-        random.seed(42)
-        dx = -0.12
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_small_dx(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with very small displacement."""
-        image, _, bboxes = base_test_image
-
-        random.seed(42)
-        dx = 0.05
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_multicolumn(
-        self, multicolumn_test_image, snapshot_png, snapshot_json
-    ):
-        """Test skew with multi-column layout."""
-        image, _, bboxes = multicolumn_test_image
-
-        random.seed(100)
-        dx = -0.18
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
         assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
 
 
@@ -321,14 +239,14 @@ class TestPerspectiveSnapshots:
         """Test perspective transformation with book curve effect."""
         image, _, bboxes = base_test_image
 
-        random.seed(42)
+        randomness.set_seed(42)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
+        perspective_img, meta, _ = _apply_perspective_distortion(
             image, distortion_type="book_curve"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
@@ -343,14 +261,14 @@ class TestPerspectiveSnapshots:
         image, _, bboxes = base_test_image
 
         # Seed to force "top" angle type
-        random.seed(10)
+        randomness.set_seed(10)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
+        perspective_img, meta, _ = _apply_perspective_distortion(
             image, distortion_type="camera_angle"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
@@ -365,14 +283,14 @@ class TestPerspectiveSnapshots:
         image, _, bboxes = base_test_image
 
         # Seed to force "left" angle type
-        random.seed(15)
+        randomness.set_seed(15)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
+        perspective_img, meta, _ = _apply_perspective_distortion(
             image, distortion_type="camera_angle"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
@@ -384,14 +302,14 @@ class TestPerspectiveSnapshots:
         """Test perspective transformation with combined effects."""
         image, _, bboxes = base_test_image
 
-        random.seed(50)
+        randomness.set_seed(50)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
+        perspective_img, meta, _ = _apply_perspective_distortion(
             image, distortion_type="combined"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
@@ -405,14 +323,14 @@ class TestPerspectiveSnapshots:
         """Test perspective transformation with multi-column layout."""
         image, _, bboxes = multicolumn_test_image
 
-        random.seed(100)
+        randomness.set_seed(100)
 
         from ocr_icelandic.transformations.perspective import (
             _apply_perspective_distortion,
             _transform_paragraph_bboxes_for_perspective,
         )
 
-        perspective_img, meta = _apply_perspective_distortion(
+        perspective_img, meta, _ = _apply_perspective_distortion(
             image, distortion_type="book_curve"
         )
         transformed_bboxes = _transform_paragraph_bboxes_for_perspective(bboxes, meta)
@@ -440,27 +358,10 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(image, angle)
+        rotated_img, meta, _ = _rotate_within_bounds(image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img
-        assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
-
-    def test_skew_near_zero(self, base_test_image, snapshot_png, snapshot_json):
-        """Test skew with very small displacement (near identity transform)."""
-        image, _, bboxes = base_test_image
-
-        dx = 0.01
-
-        from ocr_icelandic.transformations.skew import (
-            _skew_within_bounds,
-            _transform_paragraph_bboxes_for_skew,
-        )
-
-        skewed_img, meta = _skew_within_bounds(image, dx)
-        transformed_bboxes = _transform_paragraph_bboxes_for_skew(bboxes, meta)
-
-        assert snapshot_png == skewed_img
         assert snapshot_json == normalize_bboxes_for_snapshot(transformed_bboxes)
 
     def test_small_image_rotate(self, snapshot_png, snapshot_json):
@@ -475,7 +376,7 @@ class TestEdgeCaseSnapshots:
             _transform_paragraph_bboxes_for_rotation,
         )
 
-        rotated_img, meta = _rotate_within_bounds(small_image, angle)
+        rotated_img, meta, _ = _rotate_within_bounds(small_image, angle)
         transformed_bboxes = _transform_paragraph_bboxes_for_rotation(bboxes, meta)
 
         assert snapshot_png == rotated_img

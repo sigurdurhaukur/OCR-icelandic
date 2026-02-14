@@ -40,12 +40,17 @@ python scripts/prepare_data.py \
     paper_texture_probability=0.5 \
 """
 
-import gc
+from collections import defaultdict
 import logging
 import os
+import gc
 import shutil
 import sys
+<<<<<<< HEAD
 from collections import defaultdict
+=======
+from concurrent.futures import ProcessPoolExecutor, as_completed
+>>>>>>> main
 from dataclasses import asdict
 from pathlib import Path
 from typing import cast
@@ -58,15 +63,21 @@ from datasets import (
     load_dataset,
     load_from_disk,
 )
+
+from ocr_icelandic import randomness
+from ocr_icelandic.fonts import (
+    get_compatible_fonts,
+    sync_google_fonts,
+)
+from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
 from omegaconf import OmegaConf
 from PIL import Image as PILImage
 from rich.logging import RichHandler
 from tqdm import tqdm
 
 from ocr_icelandic.config import DataConfig, GenerationConfig, SingleImageData
-from ocr_icelandic.fonts import get_compatible_fonts, sync_google_fonts
-from ocr_icelandic.image_generator import generate_single_text
-from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
+from ocr_icelandic.image_generator import generate_single_chunk
+from ocr_icelandic.text_processing import split_long_text
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,20 +89,23 @@ logger = logging.getLogger(__name__)
 logging.getLogger("fontTools").setLevel(logging.ERROR)
 
 
-def _save_batch_to_disk(
-    new_data: dict,
-    batch_dir: Path,
-    batch_idx: int,
-) -> str:
-    """Save a batch of images to disk."""
-    batch_path = batch_dir / f"batch_{batch_idx:04d}"
-    batch_ds = Dataset.from_dict(dict(new_data)).cast_column("image", Image())
-    batch_ds.save_to_disk(str(batch_path))
-    return str(batch_path)
+def _save_batch_to_disk(new_data: dict, batch_dir: Path, batch_idx: int) -> str:
+    """
+    Save a batch of images to disk.
+    """
+    try:
+        batch_path = batch_dir / f"batch_{batch_idx:04d}"
+        batch_ds = Dataset.from_dict(dict(new_data)).cast_column("image", Image())
+        batch_ds.save_to_disk(str(batch_path))
+        return str(batch_path)
+    except Exception as e:
+        logger.error("Failed to save batch %d to disk: %s", batch_idx, e)
+        raise
 
 
 def _setup_fonts(cfg: DataConfig) -> list[str] | None:
     """Setup and discover available fonts."""
+
     google_fonts_api_key = os.environ.get("GOOGLE_FONTS_API_KEY")
     if google_fonts_api_key:
         logger.info("GOOGLE_FONTS_API_KEY found, syncing Google Fonts...")
@@ -186,6 +200,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     """
     Generate a dataset with images from text using batch processing.
 
+    Parallelization happens at the chunk level for better CPU utilization:
+    texts are first split into chunks, then all chunks are processed in parallel.
+
     Args:
         texts: List of text entries to convert to images
         cfg: Configuration for image generation
@@ -206,12 +223,30 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
         cfg, fonts, paper_textures, no_shadow_bgs, with_shadow_bgs
     )
 
+    # Phase 1: Split all texts into chunks (fast, sequential)
+    # This ensures parallelization happens at the chunk level for better CPU utilization
+    all_chunks: list[str] = []
+    split_texts = 0
+    for text in texts[:num_examples]:
+        chunks = split_long_text(text.strip(), cfg.max_text_length)
+        all_chunks.extend(chunks)
+        if len(chunks) > 1:
+            split_texts += 1
+
+    logger.info(
+        "Split %d texts into %d chunks (%d texts required splitting).",
+        num_examples,
+        len(all_chunks),
+        split_texts,
+    )
+
     # Batch processing setup
     batch_dir = Path(cfg.local_output_dir) / "_batches"
     batch_dir.mkdir(parents=True, exist_ok=True)
     batch_datasets: list[str] = []
     new_data: defaultdict[str, list] = defaultdict(list)
     batch_idx = 0
+<<<<<<< HEAD
     total_images = 0
 
     logger.info(
@@ -227,6 +262,43 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                 total_images += 1
 
                 # Flush batch IMMEDIATELY when threshold reached
+=======
+
+    # Scale workers with chunk count, not text count
+    max_workers = min(cfg.max_workers, len(all_chunks))
+    logger.info(
+        "Using %d parallel workers for %d chunks (batch_size=%d).",
+        max_workers,
+        len(all_chunks),
+        cfg.batch_size,
+    )
+
+    # Phase 2: Process all chunks in parallel
+    # Each worker gets a unique seed derived from base_seed + chunk_index
+    # to ensure different random choices across workers
+    base_seed = cfg.random_seed
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                generate_single_chunk, chunk, generation_cfg, base_seed + i
+            ): i
+            for i, chunk in enumerate(all_chunks)
+        }
+
+        for future in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc="Processing chunks",
+            unit="chunk",
+        ):
+            try:
+                image_data_list = future.result()
+
+                for image_data in image_data_list:
+                    _process_image_data(image_data, cfg.text_column, new_data)
+
+                # Flush batch when threshold reached
+>>>>>>> main
                 if len(new_data["image"]) >= cfg.batch_size:
                     batch_path = _save_batch_to_disk(new_data, batch_dir, batch_idx)
                     batch_datasets.append(batch_path)
@@ -239,9 +311,15 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     new_data = defaultdict(list)
                     gc.collect()
 
+<<<<<<< HEAD
         except (OSError, ValueError, RuntimeError) as e:
             logger.error("Error processing text: %s", e)
             continue
+=======
+            except (OSError, ValueError, RuntimeError) as e:
+                logger.error("Error processing chunk: %s", e)
+                continue
+>>>>>>> main
 
     # Save remaining data
     if new_data["image"]:
@@ -256,9 +334,14 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
         gc.collect()
 
     logger.info(
+<<<<<<< HEAD
         "Generated %d total images in %d batches.",
         total_images,
+=======
+        "Generated %d batches from %d chunks.",
+>>>>>>> main
         len(batch_datasets),
+        len(all_chunks),
     )
 
     # Concatenate batches
@@ -316,14 +399,25 @@ def display_sample(dataset: dict) -> None:
 
 
 def create_image_dataset(cfg: DataConfig) -> None:
-    """Main entry point for dataset creation."""
-    # Load source dataset
+    """
+    Create a dataset with images generated from text data.
+    Args:
+        cfg (DataConfig): Configuration for dataset creation
+    """
+    # Set random seed for reproducibility
+
+    randomness.set_seed(cfg.random_seed)
+    logger.info(f"Random seed set to {cfg.random_seed} for reproducibility")
+
+    # load dataset
     dataset = cast(
         Dataset,
         load_dataset(
             cfg.dataset_path,
-            cfg.data_directory if hasattr(cfg, "data_directory") else None,
+            cfg.data_directory,
             split=cfg.split,
+            cache_dir=".cache/huggingface/datasets",
+            download_mode="reuse_cache_if_exists",
         ),
     )
 

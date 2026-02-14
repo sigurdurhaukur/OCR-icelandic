@@ -140,13 +140,6 @@ tests/__snapshots__/
 - Multi-column layout rotation (+4.2°)
 - Near-zero rotation (edge case)
 
-#### Skew Transformation Tests
-- Positive horizontal skew (+0.15)
-- Negative horizontal skew (-0.12)
-- Small skew (+0.05)
-- Multi-column layout skew
-- Near-zero skew (edge case)
-
 #### Perspective Transformation Tests
 - Book curve effect
 - Camera angle from top
@@ -167,7 +160,7 @@ All snapshot tests use **fixed random seeds** to ensure deterministic behavior:
 random.seed(42)  # Results are now reproducible
 ```
 
-This is critical because transformations like `rotate()`, `skew()`, and `perspective()` use random parameters by default. Fixed seeds ensure consistent snapshots across test runs.
+This is critical because transformations like `rotate()` and `perspective()` use random parameters by default. Fixed seeds ensure consistent snapshots across test runs.
 
 ### Adding New Snapshot Tests
 

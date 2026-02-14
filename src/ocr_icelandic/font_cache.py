@@ -9,6 +9,11 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
+logger.setLevel("INFO")
+
 
 class FontCompatibilityCache:
     """SQLite-based cache for font compatibility results.
@@ -35,10 +40,13 @@ class FontCompatibilityCache:
         Args:
             cache_dir: Directory to store the SQLite database file
         """
+        logger.debug(f"Initializing FontCompatibilityCache at: {cache_dir}")
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.db_path = self.cache_dir / "font_compatibility.db"
+        logger.debug(f"Cache database path: {self.db_path}")
         self._init_database()
+        logger.info(f"FontCompatibilityCache initialized at {cache_dir}")
 
     def _init_database(self) -> None:
         """Create database tables if they don't exist."""
@@ -161,8 +169,12 @@ class FontCompatibilityCache:
             >>> if result is not None:
             ...     print(f"Cache hit: {result}")
         """
+        logger.debug(
+            f"Checking cache for: {Path(font_path).name}, language: {language_code}"
+        )
         font_path_obj = Path(font_path)
         if not font_path_obj.exists():
+            logger.debug(f"Font file not found: {font_path}")
             return None
 
         try:
@@ -199,12 +211,24 @@ class FontCompatibilityCache:
                         and result["file_size"] == current_size
                         and result["file_mtime"] == current_mtime
                     ):
-                        return bool(result["is_compatible"])
+                        is_compatible = bool(result["is_compatible"])
+                        logger.debug(
+                            f"Cache hit: {Path(font_path).name} for {language_code} = {is_compatible}"
+                        )
+                        return is_compatible
+                    else:
+                        logger.debug(
+                            f"Cache stale for: {Path(font_path).name} (file changed)"
+                        )
 
+            logger.debug(
+                f"Cache miss for: {Path(font_path).name}, language: {language_code}"
+            )
             return None
 
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error) as e:
             # If any error occurs, treat as cache miss
+            logger.debug(f"Cache lookup error for {Path(font_path).name}: {e}")
             return None
 
     def store_compatibility(
@@ -323,6 +347,9 @@ class FontCompatibilityCache:
             >>> len(fonts)
             42
         """
+        logger.debug(
+            f"Retrieving cached compatible fonts for language: {language_code}"
+        )
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Enable foreign key constraints
@@ -338,9 +365,12 @@ class FontCompatibilityCache:
                     (language_code,),
                 ).fetchall()
 
-                return [row[0] for row in results]
+                fonts = [row[0] for row in results]
+                logger.debug(f"Found {len(fonts)} compatible fonts for {language_code}")
+                return fonts
 
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            logger.error(f"Error retrieving compatible fonts for {language_code}: {e}")
             return []
 
     def record_scan(
@@ -376,6 +406,11 @@ class FontCompatibilityCache:
             ...     cache_misses=5
             ... )
         """
+        logger.info(
+            f"Recording scan: {scan_directory} ({language_code}): "
+            f"{fonts_found} fonts found, {compatible_fonts} compatible, "
+            f"{cache_hits} cache hits, {cache_misses} misses in {duration_seconds:.2f}s"
+        )
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Enable foreign key constraints
@@ -400,9 +435,9 @@ class FontCompatibilityCache:
                 )
                 conn.commit()
 
-        except sqlite3.Error:
+        except sqlite3.Error as e:
             # Silently fail on recording errors
-            pass
+            logger.debug(f"Error recording scan statistics: {e}")
 
     def clear_cache(self, language_code: str | None = None) -> None:
         """Clear cache entries.
@@ -416,6 +451,10 @@ class FontCompatibilityCache:
             >>> cache.clear_cache("is")  # Clear only Icelandic
             >>> cache.clear_cache()      # Clear all
         """
+        if language_code:
+            logger.info(f"Clearing cache for language: {language_code}")
+        else:
+            logger.warning("Clearing entire font cache")
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Enable foreign key constraints
@@ -438,16 +477,18 @@ class FontCompatibilityCache:
                         )
                     """
                     )
+                    logger.debug(f"Cleared cache entries for language: {language_code}")
                 else:
                     # Clear everything
                     conn.execute("DELETE FROM language_compatibility")
                     conn.execute("DELETE FROM font_files")
                     conn.execute("DELETE FROM scan_history")
+                    logger.debug("Cleared entire font cache database")
 
                 conn.commit()
 
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as e:
+            logger.error(f"Error clearing cache: {e}")
 
     def get_cache_stats(self) -> dict:
         """Get cache statistics for debugging and monitoring.
