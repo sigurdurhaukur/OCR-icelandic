@@ -37,7 +37,12 @@ python scripts/prepare_data.py \
     hub_repo_id="Sigurdur/isl_synthetic_ocr_v3" \
     apply_random_transformations=False \
     google_fonts_directory="./icelandic_fonts" \
-    paper_texture_probability=0.5 \
+    paper_texture_probability=0.0 \
+    background_image_probability=0.0 \
+    use_random_backgrounds=False \
+    use_paper_textures=False \
+
+
 """
 
 import gc

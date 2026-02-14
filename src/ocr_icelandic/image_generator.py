@@ -94,7 +94,7 @@ def _build_pipeline_stages(cfg: GenerationConfig) -> list:
         ApplyTransformationsStage(pipeline_type="auto"),
         CompositeBackgroundStage(),
         FinalizeImageStage(use_random_composite=cfg.use_random_backgrounds),
-        VisualizeBBoxesStage(enabled=True, show_labels=False),
+        VisualizeBBoxesStage(enabled=False, show_labels=False),
     ]
 
 
