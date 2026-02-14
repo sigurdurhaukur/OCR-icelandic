@@ -46,13 +46,6 @@ from ocr_icelandic.utils.visualization import (
     visualise_bboxes,
 )
 
-# Backward compatibility aliases for underscore-prefixed functions
-_color_to_rgb = color_to_rgb
-_calculate_luminance = calculate_luminance
-_is_grayscale = is_grayscale
-_create_paper_drop_shadow = create_paper_drop_shadow
-_visualise_bboxes = visualise_bboxes
-
 __all__ = [
     # Color utilities
     "blend_text_layer",
@@ -81,10 +74,4 @@ __all__ = [
     # Visualization
     "dummy_text_with_line_breaks",
     "visualise_bboxes",
-    # Backward compatibility aliases
-    "_color_to_rgb",
-    "_calculate_luminance",
-    "_is_grayscale",
-    "_create_paper_drop_shadow",
-    "_visualise_bboxes",
 ]
