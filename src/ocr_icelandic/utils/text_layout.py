@@ -2,9 +2,21 @@
 
 from dataclasses import dataclass
 
+import pyphen
 from PIL import ImageDraw, ImageFont
 
 from ocr_icelandic.logging_config import get_logger
+
+# Module-level hyphenator cache (lazy-initialized, keyed by language)
+_hyphenators: dict[str, pyphen.Pyphen] = {}
+
+
+def _get_hyphenator(lang: str = "is") -> pyphen.Pyphen:
+    """Get or create a hyphenator for the given language."""
+    if lang not in _hyphenators:
+        _hyphenators[lang] = pyphen.Pyphen(lang=lang)
+    return _hyphenators[lang]
+
 
 logger = get_logger(__name__)
 
@@ -58,8 +70,12 @@ def wrap_text(
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     max_width: int,
     tab_width: int = 4,
+    hyphenation_lang: str = "is",
 ) -> WrapResult:
     """Wrap each paragraph to fit within the given width.
+
+    Words that don't fit on a line are hyphenated using pyphen before
+    falling back to a hard break.
 
     Args:
         draw: ImageDraw instance for measuring text
@@ -67,6 +83,7 @@ def wrap_text(
         font: Font to use for text measurement
         max_width: Maximum width in pixels
         tab_width: Number of spaces to replace tabs with
+        hyphenation_lang: ISO 639-1 language code for hyphenation (default: "is")
 
     Returns:
         WrapResult containing wrapped paragraphs and overflow flag
@@ -105,6 +122,8 @@ def wrap_text(
         current_line: list[str] = []
         is_first_line = True
 
+        hyp = _get_hyphenator(hyphenation_lang)
+
         for word in words:
             test_line_base = " ".join(current_line + [word])
             test_line = (
@@ -116,34 +135,101 @@ def wrap_text(
             if test_width <= max_width:
                 current_line.append(word)
             else:
+                # Word doesn't fit on current line — try hyphenation
+                placed_via_hyphen = False
                 if current_line:
-                    paragraph_lines.append(
-                        (leading_whitespace if is_first_line else "")
-                        + " ".join(current_line)
+                    # Try to split the word and keep part on this line
+                    pairs = hyp.iterate(word)
+                    for head, tail in pairs:
+                        candidate = " ".join(current_line + [head + "-"])
+                        candidate_line = (
+                            leading_whitespace + candidate
+                            if is_first_line
+                            else candidate
+                        )
+                        bbox = draw.textbbox((0, 0), candidate_line, font=font)
+                        if bbox[2] - bbox[0] <= max_width:
+                            # Head fits — commit this line and carry tail forward
+                            paragraph_lines.append(
+                                (leading_whitespace if is_first_line else "")
+                                + " ".join(current_line + [head + "-"])
+                            )
+                            is_first_line = False
+                            current_line = [tail]
+                            placed_via_hyphen = True
+                            logger.debug(
+                                "Hyphenated '%s' -> '%s-' | '%s'",
+                                word,
+                                head,
+                                tail,
+                            )
+                            break
+
+                if not placed_via_hyphen:
+                    # No hyphenation fit — flush current line, start new one
+                    if current_line:
+                        paragraph_lines.append(
+                            (leading_whitespace if is_first_line else "")
+                            + " ".join(current_line)
+                        )
+                        is_first_line = False
+                    current_line = [word]
+                    test_line_base = " ".join(current_line)
+                    test_line = (
+                        leading_whitespace + test_line_base
+                        if is_first_line
+                        else test_line_base
                     )
-                    is_first_line = False
-                current_line = [word]
-                test_line_base = " ".join(current_line)
-                test_line = (
-                    leading_whitespace + test_line_base
-                    if is_first_line
-                    else test_line_base
-                )
-                bbox = draw.textbbox((0, 0), test_line, font=font)
-                if bbox[2] - bbox[0] > max_width:
-                    # Word is too long to fit on a line - mark as overflow
-                    logger.debug(
-                        "Word '%s' exceeds max width (%d > %d), marking overflow",
-                        word,
-                        bbox[2] - bbox[0],
-                        max_width,
-                    )
-                    has_overflow = True
-                    paragraph_lines.append(
-                        (leading_whitespace if is_first_line else "") + word
-                    )
-                    is_first_line = False
-                    current_line = []
+                    bbox = draw.textbbox((0, 0), test_line, font=font)
+                    if bbox[2] - bbox[0] > max_width:
+                        # Word alone is too wide — try hyphenating it across lines
+                        pairs = list(hyp.iterate(word))
+                        if pairs:
+                            # Find the longest head that fits
+                            for head, tail in pairs:
+                                head_line = (
+                                    (leading_whitespace if is_first_line else "")
+                                    + head
+                                    + "-"
+                                )
+                                bbox = draw.textbbox((0, 0), head_line, font=font)
+                                if bbox[2] - bbox[0] <= max_width:
+                                    paragraph_lines.append(head_line)
+                                    is_first_line = False
+                                    current_line = [tail]
+                                    logger.debug(
+                                        "Hyphenated long word '%s' -> '%s-' | '%s'",
+                                        word,
+                                        head,
+                                        tail,
+                                    )
+                                    break
+                            else:
+                                # No hyphenation point fits either
+                                logger.debug(
+                                    "Word '%s' exceeds max width, marking overflow",
+                                    word,
+                                )
+                                has_overflow = True
+                                paragraph_lines.append(
+                                    (leading_whitespace if is_first_line else "") + word
+                                )
+                                is_first_line = False
+                                current_line = []
+                        else:
+                            # No hyphenation points available
+                            logger.debug(
+                                "Word '%s' exceeds max width (%d > %d), marking overflow",
+                                word,
+                                bbox[2] - bbox[0],
+                                max_width,
+                            )
+                            has_overflow = True
+                            paragraph_lines.append(
+                                (leading_whitespace if is_first_line else "") + word
+                            )
+                            is_first_line = False
+                            current_line = []
 
         if current_line:
             paragraph_lines.append(

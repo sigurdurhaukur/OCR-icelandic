@@ -5,11 +5,7 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw
 
 from ocr_icelandic.logging_config import get_logger
-from ocr_icelandic.utils.color import (
-    blend_text_layer,
-    color_to_rgb,
-    get_blend_mode,
-)
+from ocr_icelandic.utils.color import blend_text_layer, color_to_rgb, get_blend_mode
 from ocr_icelandic.utils.font import load_font, load_font_with_style
 from ocr_icelandic.utils.text_layout import (
     ParagraphFontConfig,
@@ -100,6 +96,7 @@ def create_image_with_text(
     add_noise: bool = True,
     bbox_per_column: bool = False,
     bbox_max_chars: int | None = None,
+    hyphenation_lang: str = "is",
 ) -> tuple[Image.Image, str, list[dict]]:
     """
     Create an image with text for OCR training and return paragraph bounding boxes.
@@ -126,6 +123,7 @@ def create_image_with_text(
         displacement_lighting: If True, apply lighting effects based on paper surface normals
         add_noise: If True, add Gaussian noise to the background for realism. Set to False
             for deterministic output (useful for testing).
+        hyphenation_lang: ISO 639-1 language code for word hyphenation (default: "is")
 
     Returns:
         tuple: (PIL Image object, string of text that actually fits in the image, paragraph bounding boxes)
@@ -287,7 +285,12 @@ def create_image_with_text(
 
             # Wrap text with this font
             wrap_result = wrap_text(
-                draw, para_text, para_font, current_column_width, tab_width
+                draw,
+                para_text,
+                para_font,
+                current_column_width,
+                tab_width,
+                hyphenation_lang=hyphenation_lang,
             )
 
             # Store font config in wrapped paragraph

@@ -62,6 +62,7 @@ class RenderTextStage(BaseStage):
             paragraph_font_configs=state.paragraph_font_configs,
             bbox_per_column=state.bbox_per_column,
             bbox_max_chars=state.bbox_max_chars,
+            hyphenation_lang=state.hyphenation_lang,
         )
 
         state.image = image

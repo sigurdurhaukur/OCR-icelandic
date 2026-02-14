@@ -173,6 +173,7 @@ def generate_single_chunk(
             paragraph_font_configs=paragraph_font_configs,
             bbox_per_column=cfg.bbox_per_column,
             bbox_max_chars=cfg.bbox_max_chars,
+            hyphenation_lang=cfg.language_code,
         )
 
         # Run the pipeline
@@ -249,6 +250,7 @@ def generate_single_text(
                 column_gap=cfg.column_gap,
                 column_width=settings["column_width"],
                 paper_texture_path=settings["paper_texture_path"],
+                hyphenation_lang=cfg.language_code,
             )
 
             if not fitted_text:
