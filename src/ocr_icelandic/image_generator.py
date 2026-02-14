@@ -90,7 +90,12 @@ def _build_pipeline_stages(cfg: GenerationConfig) -> list:
             probability=cfg.background_image_probability,
         ),
         RenderTextStage(apply_displacement=True),
-        ApplyTransformationsStage(pipeline_type="auto"),
+        ApplyTransformationsStage(
+            probability_overrides={
+                "textured_stains": 0.0
+            },  # Disable stains for now, while we are developing the OCR model
+            pipeline_type="auto",
+        ),
         CompositeBackgroundStage(),
         FinalizeImageStage(use_random_composite=cfg.use_random_backgrounds),
         VisualizeBBoxesStage(enabled=False, show_labels=False),

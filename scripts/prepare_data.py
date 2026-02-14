@@ -17,9 +17,7 @@ python scripts/prepare_data.py \
     num_examples=1000 \
     push_to_hub=True \
     hub_repo_id="Sigurdur/eng_synthetic_ocr_v2" \
-    apply_random_transformations=False \
     google_fonts_directory="./english_fonts" \
-    paper_texture_probability=0.3 \
 
 Generating icelandic synthetic OCR dataset as an example:
 
@@ -35,9 +33,7 @@ python scripts/prepare_data.py \
     num_examples=2000 \
     push_to_hub=True \
     hub_repo_id="Sigurdur/isl_synthetic_ocr_v3" \
-    apply_random_transformations=False \
     google_fonts_directory="./icelandic_fonts" \
-    paper_texture_probability=0.0 \
     background_image_probability=0.0 \
     use_random_backgrounds=False \
     use_paper_textures=False \

@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import psutil
 
-
 if TYPE_CHECKING:
     from PIL import Image as PILImage
 
@@ -55,15 +54,11 @@ class DataConfig:
     use_random_backgrounds: bool = True
     use_paper_textures: bool = True
     paper_textures_dir: str = "assets/papers"
-    paper_texture_probability: float = (
-        0.5  # Probability of using paper texture vs synthetic background with noise
-    )
     use_background_images: bool = True
     backgrounds_dir: str = "assets/backgrounds"
     background_image_probability: float = 1.0
 
     # Transformations
-    apply_random_transformations: bool = True
     enable_font_size_variation: bool = True
     font_size_min_ratio: float = 0.9
     font_size_max_ratio: float = 1.1
