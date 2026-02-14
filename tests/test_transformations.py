@@ -7,7 +7,6 @@ from PIL import Image
 from ocr_icelandic.utils import create_image_with_text
 from ocr_icelandic.transformations.transformations import (
     blur,
-    ink_splashes,
     dusty_paper,
     reverse_bleed_through,
     textured_stains,
@@ -16,7 +15,6 @@ from ocr_icelandic.transformations.transformations import (
     apply_random_transformation,
 )
 from ocr_icelandic.transformations.rotate import rotate
-from ocr_icelandic.transformations.skew import skew
 from ocr_icelandic.transformations.perspective import perspective
 
 
@@ -110,20 +108,6 @@ class TestContentTransformations:
         result = blur(sample_image_no_text, bg_color="white", paragraph_bboxes=None)
         validate_transformation_output(result, sample_image_no_text, has_bboxes=False)
 
-    def test_ink_splashes_with_text(self, sample_image_with_text):
-        """Test ink splashes transformation."""
-        image, _, bboxes = sample_image_with_text
-        result = ink_splashes(image, bg_color="white", paragraph_bboxes=bboxes)
-
-        validate_transformation_output(result, image)
-        _, metadata, _ = result
-
-        assert metadata["transformation"] == "ink_splashes"
-        assert "splashes" in metadata
-        assert 3 <= metadata["splashes"] <= 6
-
-        result[0].save("local_output/transformations/test_ink_splashes.png")
-
     def test_dusty_paper_with_text(self, sample_image_with_text):
         """Test dusty paper transformation."""
         image, _, bboxes = sample_image_with_text
@@ -168,8 +152,18 @@ class TestContentTransformations:
         _, metadata, _ = result
 
         assert metadata["transformation"] == "coffee_stains"
-        assert "position" in metadata
-        assert "scale_factor" in metadata
+        assert "num_stains" in metadata
+        assert 1 <= metadata["num_stains"] <= 5
+        assert "stains" in metadata
+        assert len(metadata["stains"]) == metadata["num_stains"]
+
+        # Check each stain has the expected metadata
+        for stain_meta in metadata["stains"]:
+            assert "position" in stain_meta
+            assert "scale_factor" in stain_meta
+            assert "rotation_angle" in stain_meta
+            assert 1.0 <= stain_meta["scale_factor"] <= 2.0
+            assert 0 <= stain_meta["rotation_angle"] <= 360
 
         result[0].save("local_output/transformations/test_textured_stains.png")
 
@@ -187,54 +181,86 @@ class TestPerspectiveTransformations:
         image, _, bboxes = sample_image_with_text
         result = rotate(image, bg_color="white", paragraph_bboxes=bboxes)
 
-        validate_transformation_output(result, image)
-        transformed_img, metadata, transformed_bboxes = result
+        # rotate now returns 4 elements (image, metadata, bboxes, background)
+        assert isinstance(result, tuple), "Transformation should return a tuple"
+        assert len(result) == 4, "rotate should return 4 elements"
 
+        transformed_img, metadata, transformed_bboxes, transformed_bg = result
+
+        # Validate image
+        assert isinstance(transformed_img, Image.Image), (
+            "First element should be PIL Image"
+        )
+        assert transformed_img.size == image.size, "Image size should be preserved"
+
+        # Validate metadata
+        assert isinstance(metadata, dict), "Second element should be metadata dict"
         assert metadata["transformation"] == "rotate"
         assert "angle" in metadata
         assert -5 <= metadata["angle"] <= 5
 
         # Verify bboxes were transformed
+        assert isinstance(transformed_bboxes, list), (
+            "Third element should be list of bboxes"
+        )
         assert len(transformed_bboxes) == len(bboxes)
+
+        # Validate background (should be None when no background provided)
+        assert transformed_bg is None, "Background should be None when not provided"
 
         result[0].save("local_output/transformations/test_rotate.png")
 
     def test_rotate_no_text(self, sample_image_no_text):
         """Test rotation without text."""
         result = rotate(sample_image_no_text, bg_color="white", paragraph_bboxes=None)
-        validate_transformation_output(result, sample_image_no_text, has_bboxes=False)
 
-    def test_skew_with_text(self, sample_image_with_text):
-        """Test skew transformation."""
-        image, _, bboxes = sample_image_with_text
-        result = skew(image, bg_color="white", paragraph_bboxes=bboxes)
+        # rotate now returns 4 elements
+        assert isinstance(result, tuple), "Transformation should return a tuple"
+        assert len(result) == 4, "rotate should return 4 elements"
 
-        validate_transformation_output(result, image)
-        transformed_img, metadata, transformed_bboxes = result
+        transformed_img, metadata, transformed_bboxes, transformed_bg = result
 
-        assert metadata["transformation"] == "skew"
-        assert "skew_factor" in metadata
-        assert -0.2 <= metadata["skew_factor"] <= 0.2
+        # Validate image
+        assert isinstance(transformed_img, Image.Image)
+        assert transformed_img.size == sample_image_no_text.size
 
-        # Verify bboxes were transformed
-        assert len(transformed_bboxes) == len(bboxes)
+        # Validate metadata
+        assert isinstance(metadata, dict)
+        assert metadata["transformation"] == "rotate"
 
-        result[0].save("local_output/transformations/test_skew.png")
+        # Validate bboxes (should be empty list when None provided)
+        assert isinstance(transformed_bboxes, list)
+
+        # Validate background
+        assert transformed_bg is None
 
     def test_perspective_with_text(self, sample_image_with_text):
         """Test perspective transformation."""
         image, _, bboxes = sample_image_with_text
         result = perspective(image, bg_color="white", paragraph_bboxes=bboxes)
 
-        validate_transformation_output(result, image)
-        transformed_img, metadata, transformed_bboxes = result
+        # perspective now returns 4 elements (image, metadata, bboxes, background)
+        assert isinstance(result, tuple), "Transformation should return a tuple"
+        assert len(result) == 4, "perspective should return 4 elements"
 
+        transformed_img, metadata, transformed_bboxes, transformed_bg = result
+
+        # Validate image
+        assert isinstance(transformed_img, Image.Image)
+        assert transformed_img.size == image.size
+
+        # Validate metadata
+        assert isinstance(metadata, dict)
         assert metadata["transformation"] == "perspective"
         assert "type" in metadata
         assert metadata["type"] in ["book_curve", "camera_angle", "combined"]
 
         # Verify bboxes were transformed
+        assert isinstance(transformed_bboxes, list)
         assert len(transformed_bboxes) == len(bboxes)
+
+        # Validate background (should be None when not provided)
+        assert transformed_bg is None
 
         result[0].save("local_output/transformations/test_perspective.png")
 
@@ -296,10 +322,13 @@ class TestApplyRandomTransformation:
             image, bg_color="white", paragraph_bboxes=bboxes
         )
 
+        # apply_random_transformation now returns 4 elements
         assert isinstance(result, tuple)
-        assert len(result) == 3
+        assert len(result) == 4, "apply_random_transformation should return 4 elements"
 
-        transformed_img, transformation_metadata, transformed_bboxes = result
+        transformed_img, transformation_metadata, transformed_bboxes, transformed_bg = (
+            result
+        )
 
         # Validate image
         assert isinstance(transformed_img, Image.Image)
@@ -318,6 +347,9 @@ class TestApplyRandomTransformation:
         assert isinstance(transformed_bboxes, list)
         assert len(transformed_bboxes) == len(bboxes)
 
+        # Validate background (should be None when not provided)
+        assert transformed_bg is None
+
         result[0].save("local_output/transformations/test_random_transformation.png")
 
     def test_apply_random_transformation_no_text(self, sample_image_no_text):
@@ -326,13 +358,19 @@ class TestApplyRandomTransformation:
             sample_image_no_text, bg_color="white", paragraph_bboxes=None
         )
 
+        # apply_random_transformation now returns 4 elements
         assert isinstance(result, tuple)
-        assert len(result) == 3
+        assert len(result) == 4, "apply_random_transformation should return 4 elements"
 
-        transformed_img, transformation_metadata, transformed_bboxes = result
+        transformed_img, transformation_metadata, transformed_bboxes, transformed_bg = (
+            result
+        )
 
+        # Validate outputs
         assert isinstance(transformed_img, Image.Image)
         assert isinstance(transformation_metadata, list)
+        assert isinstance(transformed_bboxes, list)
+        assert transformed_bg is None
 
 
 # ============================================================================
@@ -407,7 +445,7 @@ class TestConsistency:
         image, _, original_bboxes = sample_image_with_text
 
         # Content transformations should not alter bboxes
-        content_transforms = [blur, ink_splashes, dusty_paper]
+        content_transforms = [blur, dusty_paper]
 
         for transform in content_transforms:
             _, _, result_bboxes = transform(

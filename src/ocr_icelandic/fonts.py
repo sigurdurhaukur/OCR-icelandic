@@ -3,8 +3,6 @@ Font management utilities for OCR Icelandic.
 Handles font discovery, Google Fonts synchronization, and Icelandic character support checking.
 """
 
-import logging
-import random
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -15,7 +13,9 @@ import tenacity
 from fontTools.ttLib import TTFont
 from tqdm import tqdm
 
-logger = logging.getLogger(__name__)
+from ocr_icelandic.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class GoogleFont(TypedDict):
@@ -120,8 +120,15 @@ def download_font_task(font: GoogleFont, fonts_path: Path) -> tuple[int, int, in
     if not files:
         return local_downloaded, local_skipped, local_failed
 
-    # Download all variants (regular, bold, italic, etc.)
+    # Download all variants (regular, bold, italic, etc., but only weights between 400-700)
     for variant, url in files.items():
+        # Filter variants to common weights only
+        if not any(
+            weight in variant for weight in ["400", "500", "600", "700"]
+        ) and variant not in ["regular", "italic", "bold", "bolditalic"]:
+            local_skipped += 1
+            continue
+
         # Create safe filename
         safe_family = "".join(
             c if c.isalnum() or c in (" ", "-", "_") else "_" for c in family
@@ -129,6 +136,7 @@ def download_font_task(font: GoogleFont, fonts_path: Path) -> tuple[int, int, in
         safe_variant = "".join(
             c if c.isalnum() or c in ("-", "_") else "_" for c in variant
         )
+
         filename = f"{safe_family}-{safe_variant}.ttf"
         output_path = fonts_path / filename
 
@@ -264,7 +272,7 @@ def get_compatible_fonts(
     from ocr_icelandic.font_cache import FontCompatibilityCache
     from ocr_icelandic.language_support import LanguageRegistry
 
-    random.seed(42)  # For reproducibility
+    # Note: Reproducibility is now managed centrally via ocr_icelandic.randomness.set_seed()
 
     # Get language character set (raises NotImplementedError if not supported)
     language = LanguageRegistry.get_language(language_code)

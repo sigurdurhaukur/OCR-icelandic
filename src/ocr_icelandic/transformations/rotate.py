@@ -1,16 +1,26 @@
 import math
-import random
 
 from PIL import Image
 
+from ocr_icelandic import randomness
+
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
     _clamp_value,
     _copy_paragraph_bboxes,
     _round_bbox,
 )
 
+logger = get_logger(__name__)
 
-def _rotate_within_bounds(image: Image.Image, angle: float) -> tuple[Image.Image, dict]:
+
+def _rotate_within_bounds(
+    image: Image.Image,
+    angle: float,
+    background_image: Image.Image | None = None,
+    background_angle: float | None = None,
+) -> tuple[Image.Image, dict, Image.Image | None]:
+    logger.debug("Rotating image by %.2f degrees", angle)
     width, height = image.size
 
     # Calculate how much the corners can expand when rotated
@@ -29,13 +39,49 @@ def _rotate_within_bounds(image: Image.Image, angle: float) -> tuple[Image.Image
     canvas = Image.new("RGBA", (canvas_width, canvas_height), (0, 0, 0, 0))
     canvas.paste(image, (pad, pad), image if image.mode == "RGBA" else None)
 
-    # Rotate with transparent fill
+    # Prepare background if provided
+    bg_canvas = None
+    if background_image is not None and background_angle is not None:
+        logger.debug(
+            "Preparing background for rotation by %.2f degrees", background_angle
+        )
+        # Scale background to cover the canvas dimensions
+        # Use max scale to ensure full coverage (same approach as perspective.py)
+        bg_width, bg_height = background_image.size
+        scale_x = canvas_width / bg_width
+        scale_y = canvas_height / bg_height
+        bg_scale = max(scale_x, scale_y)
+
+        new_width = int(bg_width * bg_scale)
+        new_height = int(bg_height * bg_scale)
+        expanded_bg = background_image.resize(
+            (new_width, new_height), Image.Resampling.BICUBIC
+        )
+
+        # Crop from center to match canvas size
+        left = (new_width - canvas_width) // 2
+        top = (new_height - canvas_height) // 2
+        bg_canvas = expanded_bg.crop(
+            (left, top, left + canvas_width, top + canvas_height)
+        ).convert("RGBA")
+
+    # Rotate document with transparent fill
     rotated = canvas.rotate(
         angle,
         resample=Image.Resampling.BICUBIC,
         expand=True,
         fillcolor=(0, 0, 0, 0),
     )
+
+    # Rotate background with its own angle if provided
+    rotated_bg = None
+    if bg_canvas is not None:
+        rotated_bg = bg_canvas.rotate(
+            background_angle,
+            resample=Image.Resampling.BICUBIC,
+            expand=True,
+            fillcolor=(0, 0, 0, 0),
+        )
 
     # Crop from center
     center_x = rotated.width / 2
@@ -56,11 +102,27 @@ def _rotate_within_bounds(image: Image.Image, angle: float) -> tuple[Image.Image
     if scale < 1.0:
         cropped = cropped.resize((width, height), Image.Resampling.BICUBIC)
 
+    # Crop and resize background using same crop box (from its center)
+    final_bg = None
+    if rotated_bg is not None:
+        bg_center_x = rotated_bg.width / 2
+        bg_center_y = rotated_bg.height / 2
+        bg_left = bg_center_x - crop_width // 2
+        bg_top = bg_center_y - crop_height // 2
+        cropped_bg = rotated_bg.crop(
+            (bg_left, bg_top, bg_left + crop_width, bg_top + crop_height)
+        )
+        if scale < 1.0:
+            final_bg = cropped_bg.resize((width, height), Image.Resampling.BICUBIC)
+        else:
+            final_bg = cropped_bg
+
     rotation_meta = {
         "pad": pad,
         "canvas_center": (canvas_width / 2, canvas_height / 2),
         "rotated_center": (rotated.width / 2, rotated.height / 2),
         "angle": angle,
+        "background_angle": background_angle if background_angle is not None else None,
         "crop_box": (left, top, left + crop_width, top + crop_height),
         "resize_scale": (
             width / crop_width if scale < 1.0 else 1.0,
@@ -69,7 +131,7 @@ def _rotate_within_bounds(image: Image.Image, angle: float) -> tuple[Image.Image
         "target_size": (width, height),
     }
 
-    return cropped, rotation_meta
+    return cropped, rotation_meta, final_bg
 
 
 def _transform_paragraph_bboxes_for_rotation(
@@ -152,17 +214,41 @@ def rotate(
     image: Image.Image,
     bg_color: str | tuple[int, int, int],
     paragraph_bboxes: list[dict] | None = None,
-) -> tuple[Image.Image, dict, list[dict]]:
+    background_image: Image.Image | None = None,
+) -> tuple[Image.Image, dict, list[dict], Image.Image | None]:
     """
     Apply rotation transformation with transparent background.
 
     Note: bg_color parameter is kept for API compatibility but not used.
     The transformation uses transparent fills to preserve alpha channel.
+
+    Args:
+        image: Document image to transform
+        bg_color: Background color (kept for API compatibility)
+        paragraph_bboxes: Optional paragraph bounding boxes
+        background_image: Optional background to rotate with different angle
+
+    Returns:
+        Tuple of (rotated image, metadata, transformed bboxes, rotated background)
     """
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
-    angle = random.uniform(-5, 5)
-    rotated, rotate_meta = _rotate_within_bounds(image, angle)
+    # Generate document rotation angle
+    angle = randomness.uniform(-5, 5)
+
+    # Generate different background angle if background is provided
+    background_angle = None
+    if background_image is not None:
+        background_angle = randomness.uniform(-5, 5)
+        logger.debug(
+            "Rotating document by %.2f degrees, background by %.2f degrees",
+            angle,
+            background_angle,
+        )
+
+    rotated, rotate_meta, rotated_bg = _rotate_within_bounds(
+        image, angle, background_image, background_angle
+    )
     transformed_bboxes = _transform_paragraph_bboxes_for_rotation(
         paragraph_bboxes_copy, rotate_meta
     )
@@ -171,6 +257,10 @@ def rotate(
         {
             "transformation": "rotate",
             "angle": round(angle, 2),
+            "background_angle": (
+                round(background_angle, 2) if background_angle is not None else None
+            ),
         },
         transformed_bboxes,
+        rotated_bg,
     )

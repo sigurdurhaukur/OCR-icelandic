@@ -1,12 +1,15 @@
-import random
-
 from PIL import Image
 
+from ocr_icelandic import randomness
+
+from ocr_icelandic.logging_config import get_logger
 from ocr_icelandic.transformations.shared import (
     _clamp_value,
     _copy_paragraph_bboxes,
     _round_bbox,
 )
+
+logger = get_logger(__name__)
 
 
 def tight_crop(
@@ -26,10 +29,12 @@ def tight_crop(
     Returns:
         Tuple of (transformed image, metadata dict, transformed bboxes)
     """
+    logger.debug("Applying tight crop transformation")
     paragraph_bboxes_copy = _copy_paragraph_bboxes(paragraph_bboxes)
 
     # If no bounding boxes, return original
     if not paragraph_bboxes_copy:
+        logger.debug("No bounding boxes provided, skipping tight crop")
         return (
             image,
             {"transformation": "tight_crop", "applied": False},
@@ -52,6 +57,7 @@ def tight_crop(
 
     # If no valid bboxes, return original
     if not all_x0:
+        logger.debug("No valid bounding boxes found, skipping tight crop")
         return (
             image,
             {"transformation": "tight_crop", "applied": False},
@@ -73,9 +79,14 @@ def tight_crop(
     image_area = image_width * image_height
     coverage = text_area / image_area if image_area > 0 else 1.0
 
+    logger.debug("Text coverage: %.1f%% of image", coverage * 100)
+
     # Only apply tight crop if text coverage is less than 50%
     # This means there's significant empty space
     if coverage >= 0.5:
+        logger.debug(
+            "Text coverage too high (%.1f%%), skipping tight crop", coverage * 100
+        )
         return (
             image,
             {
@@ -87,8 +98,8 @@ def tight_crop(
             paragraph_bboxes_copy,
         )
 
-    # Add random padding around the text (5% to 15% of text dimensions)
-    pad_ratio = random.uniform(0.05, 0.15)
+    # Add random padding around the text (10% to 25% of text dimensions)
+    pad_ratio = randomness.uniform(0.1, 0.25)
     pad_x = int(text_width * pad_ratio)
     pad_y = int(text_height * pad_ratio)
 
@@ -115,7 +126,6 @@ def tight_crop(
 
     # Crop the image
     cropped = image.crop((crop_x0, crop_y0, crop_x1, crop_y1))
-
     # Create a transparent canvas of original size
     result = Image.new("RGBA", (image_width, image_height), (0, 0, 0, 0))
 

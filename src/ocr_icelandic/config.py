@@ -1,7 +1,10 @@
 """Configuration dataclasses for synthetic OCR dataset generation."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+import psutil
+
 
 if TYPE_CHECKING:
     from PIL import Image as PILImage
@@ -30,9 +33,13 @@ class DataConfig:
     font_size: int | None = None  # Fixed size, or None to use range
     font_size_range: tuple[int, int] = (11, 24)
     font_color: str = "black"
+    font_path: str | None = None  # Fixed path, or None to use random
     use_random_fonts: bool = True
     use_random_font_sizes: bool = True
     use_random_font_colors: bool = True
+    enable_font_styles: bool = True
+    font_bold_probability: float = 0.2
+    font_underline_probability: float = 0.1
 
     # Text layout
     max_text_length: int = 2000
@@ -57,6 +64,13 @@ class DataConfig:
 
     # Transformations
     apply_random_transformations: bool = True
+    enable_font_size_variation: bool = True
+    font_size_min_ratio: float = 0.9
+    font_size_max_ratio: float = 1.1
+
+    # Bounding box settings
+    bbox_per_column: bool = True  # Split bboxes at column boundaries
+    bbox_max_chars: int | None = None  # Max characters per bbox (None = unlimited)
 
     # Output settings
     local_output_dir: str = "./local_output"
@@ -72,8 +86,11 @@ class DataConfig:
     font_cache_dir: str = ".fontcache"
 
     # Processing
-    max_workers: int = 1
+    max_workers: int = field(default_factory=lambda: psutil.cpu_count(False) or 1)
     batch_size: int = 50
+
+    # Random seed
+    random_seed: int = 42
 
 
 @dataclass
@@ -103,3 +120,5 @@ class SingleImageData:
     text_horizontal_alignment: str
     paragraph_bboxes: list[dict]
     transformations: list[dict]
+    paragraph_font_sizes: list[int] | None = None  # Font size per paragraph
+    paragraph_styles: list[dict] | None = None  # Style flags per paragraph

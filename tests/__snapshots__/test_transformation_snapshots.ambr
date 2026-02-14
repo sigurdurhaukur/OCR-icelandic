@@ -1,0 +1,424 @@
+# serializer version: 1
+# name: TestEdgeCaseSnapshots.test_rotate_near_zero
+  list([
+    dict({
+      'bbox': list([
+        26,
+        229,
+        268,
+        239,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        26,
+        252,
+        472,
+        263,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        26,
+        276,
+        479,
+        287,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestEdgeCaseSnapshots.test_small_image_rotate
+  list([
+    dict({
+      'bbox': list([
+        10,
+        10,
+        90,
+        90,
+      ]),
+    }),
+  ])
+# ---
+# name: TestPerspectiveSnapshots.test_perspective_book_curve
+  list([
+    dict({
+      'bbox': list([
+        39,
+        231,
+        268,
+        240,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        39,
+        253,
+        461,
+        263,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        39,
+        275,
+        467,
+        286,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestPerspectiveSnapshots.test_perspective_camera_angle_left
+  list([
+    dict({
+      'bbox': list([
+        49,
+        244,
+        267,
+        254,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        50,
+        266,
+        450,
+        276,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        51,
+        289,
+        455,
+        299,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestPerspectiveSnapshots.test_perspective_camera_angle_top
+  list([
+    dict({
+      'bbox': list([
+        62,
+        207,
+        267,
+        216,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        60,
+        228,
+        441,
+        238,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        58,
+        250,
+        449,
+        261,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestPerspectiveSnapshots.test_perspective_combined
+  list([
+    dict({
+      'bbox': list([
+        44,
+        226,
+        268,
+        235,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        44,
+        247,
+        456,
+        258,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        43,
+        270,
+        463,
+        280,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestPerspectiveSnapshots.test_perspective_multicolumn
+  list([
+    dict({
+      'bbox': list([
+        43,
+        16,
+        285,
+        48,
+      ]),
+      'char_count': 113,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'Column layouts are common in documents like newspapers and academic papers. Each column should be handled properly.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        43,
+        60,
+        284,
+        79,
+      ]),
+      'char_count': 82,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'The transformation must preserve the relative positions of text across all columns.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestRotateSnapshots.test_rotate_multicolumn
+  list([
+    dict({
+      'bbox': list([
+        43,
+        22,
+        274,
+        70,
+      ]),
+      'char_count': 113,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'Column layouts are common in documents like newspapers and academic papers. Each column should be handled properly.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        46,
+        65,
+        276,
+        101,
+      ]),
+      'char_count': 82,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'The transformation must preserve the relative positions of text across all columns.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestRotateSnapshots.test_rotate_small_angle_negative
+  list([
+    dict({
+      'bbox': list([
+        37,
+        220,
+        269,
+        240,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        36,
+        241,
+        462,
+        273,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        35,
+        264,
+        468,
+        296,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
+# name: TestRotateSnapshots.test_rotate_small_angle_positive
+  list([
+    dict({
+      'bbox': list([
+        38,
+        230,
+        266,
+        253,
+      ]),
+      'char_count': 51,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 0,
+      'paragraph_text': 'This is a sample document with multiple paragraphs.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        39,
+        240,
+        460,
+        276,
+      ]),
+      'char_count': 95,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 1,
+      'paragraph_text': 'Each paragraph will have its own bounding box that needs to be tracked through transformations.',
+      'sequence_number': 0,
+    }),
+    dict({
+      'bbox': list([
+        40,
+        262,
+        468,
+        298,
+      ]),
+      'char_count': 100,
+      'columns': list([
+        0,
+      ]),
+      'paragraph_index': 2,
+      'paragraph_text': 'This ensures that the OCR model can learn proper text localization even after geometric distortions.',
+      'sequence_number': 0,
+    }),
+  ])
+# ---
