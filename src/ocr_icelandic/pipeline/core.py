@@ -1,9 +1,9 @@
 """Core pipeline infrastructure for OCR image generation."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
-from collections.abc import Callable
 
 from PIL import Image
 
@@ -42,6 +42,7 @@ class PipelineState:
     column_width: int | None = None
     alignment: str = "left"
     vertical_alignment: str = "center"
+    hyphenation_lang: str = "is"  # ISO 639-1 language code for word hyphenation
 
     # Bounding box settings
     bbox_per_column: bool = False

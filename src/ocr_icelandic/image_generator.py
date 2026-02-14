@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ocr_icelandic import randomness
+from ocr_icelandic.config import SingleImageData
 from ocr_icelandic.pipeline.core import Pipeline, PipelineState
 from ocr_icelandic.pipeline.stages.postprocessing import (
     CompositeBackgroundStage,
@@ -15,13 +16,11 @@ from ocr_icelandic.pipeline.stages.rendering import RenderTextStage
 from ocr_icelandic.pipeline.stages.selection import (
     SelectBackgroundImageStage,
     SelectColorsStage,
-    SelectLayoutStage,
     SelectFontStage,
+    SelectLayoutStage,
     SelectPaperTextureStage,
 )
 from ocr_icelandic.pipeline.stages.transformations import ApplyTransformationsStage
-from ocr_icelandic.text_processing import split_long_text
-from ocr_icelandic.config import SingleImageData
 
 if TYPE_CHECKING:
     from ocr_icelandic.config import GenerationConfig
@@ -91,10 +90,15 @@ def _build_pipeline_stages(cfg: GenerationConfig) -> list:
             probability=cfg.background_image_probability,
         ),
         RenderTextStage(apply_displacement=True),
-        ApplyTransformationsStage(pipeline_type="auto"),
+        ApplyTransformationsStage(
+            probability_overrides={
+                "textured_stains": 0.0
+            },  # Disable stains for now, while we are developing the OCR model
+            pipeline_type="auto",
+        ),
         CompositeBackgroundStage(),
         FinalizeImageStage(use_random_composite=cfg.use_random_backgrounds),
-        VisualizeBBoxesStage(enabled=True, show_labels=False),
+        VisualizeBBoxesStage(enabled=False, show_labels=False),
     ]
 
 
@@ -132,9 +136,7 @@ def generate_single_chunk(
         paragraph_styles = None
 
         if cfg.enable_font_size_variation or cfg.enable_font_styles:
-            from ocr_icelandic.utils.text_layout import (
-                calculate_paragraph_font_sizes,
-            )
+            from ocr_icelandic.utils.text_layout import calculate_paragraph_font_sizes
 
             paragraphs = remaining_text.split("\n\n")
             num_paragraphs = len(paragraphs)
@@ -175,6 +177,7 @@ def generate_single_chunk(
             paragraph_font_configs=paragraph_font_configs,
             bbox_per_column=cfg.bbox_per_column,
             bbox_max_chars=cfg.bbox_max_chars,
+            hyphenation_lang=cfg.language_code,
         )
 
         # Run the pipeline
@@ -207,30 +210,3 @@ def generate_single_chunk(
         remaining_text = remaining_text[len(result.fitted_text) :].lstrip()
 
     return images
-
-
-def generate_single_text(
-    text: str, cfg: GenerationConfig
-) -> tuple[list[SingleImageData], int]:
-    """
-    Generate images from text using the pipeline architecture.
-
-    This function splits the text into chunks and generates images for each chunk.
-    For better parallelization at the chunk level, use generate_single_chunk()
-    directly after splitting texts with split_long_text().
-
-    Args:
-        text: Full text to render as images
-        cfg: Generation configuration
-
-    Returns:
-        Tuple of (list of SingleImageData, number of chunks the text was split into)
-    """
-    # Split long texts first
-    text_chunks = split_long_text(text.strip(), cfg.max_text_length)
-
-    images: list[SingleImageData] = []
-    for chunk in text_chunks:
-        images.extend(generate_single_chunk(chunk, cfg))
-
-    return images, len(text_chunks)

@@ -245,7 +245,6 @@ See `src/ocr_icelandic/config.py` for full `DataConfig` options. Key settings:
 - **Layout**: `column_range`, `column_gap`, `text_horizontal_alignment`
 - **Bounding Boxes**: `bbox_per_column`, `bbox_max_chars`
 - **Textures**: `use_paper_textures`, `use_background_images`
-- **Transformations**: `apply_random_transformations`
 - **Output**: `local_output_dir`, `save_to_disk`, `push_to_hub`
 
 ### Usage Examples
@@ -271,8 +270,7 @@ python scripts/prepare_data.py \
 python scripts/prepare_data.py \
   num_columns=2 \
   column_gap=30 \
-  use_paper_textures=True \
-  paper_texture_probability=0.8
+  use_paper_textures=True
 ```
 
 ## Bounding Box Configuration
@@ -566,7 +564,6 @@ For non-Latin scripts: ensure Unicode font support, consider larger image sizes.
 **Images look unrealistic**
 - Enable `use_background_images=True`
 - Enable `use_paper_textures=True`
-- Increase `paper_texture_probability`
 
 **Text doesn't fit**
 - Increase `image_width`/`image_height`

@@ -17,9 +17,7 @@ python scripts/prepare_data.py \
     num_examples=1000 \
     push_to_hub=True \
     hub_repo_id="Sigurdur/eng_synthetic_ocr_v2" \
-    apply_random_transformations=False \
     google_fonts_directory="./english_fonts" \
-    paper_texture_probability=0.3 \
 
 Generating icelandic synthetic OCR dataset as an example:
 
@@ -28,24 +26,27 @@ python scripts/prepare_data.py \
     text_column="document" \
     data_directory="parla" \
     split="train" \
-    max_entries=1 \
+    max_entries=100 \
     column_range="[1,1]" \
     max_workers=1 \
     local_output_dir="isl_synthetic_ocr_output_v3" \
     num_examples=2000 \
     push_to_hub=True \
     hub_repo_id="Sigurdur/isl_synthetic_ocr_v3" \
-    apply_random_transformations=False \
     google_fonts_directory="./icelandic_fonts" \
-    paper_texture_probability=0.5 \
+    background_image_probability=0.0 \
+    use_random_backgrounds=False \
+    use_paper_textures=False \
+
+
 """
 
-from collections import defaultdict
+import gc
 import logging
 import os
-import gc
 import shutil
 import sys
+from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
@@ -59,21 +60,17 @@ from datasets import (
     load_dataset,
     load_from_disk,
 )
-
-from ocr_icelandic import randomness
-from ocr_icelandic.fonts import (
-    get_compatible_fonts,
-    sync_google_fonts,
-)
-from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
 from omegaconf import OmegaConf
 from PIL import Image as PILImage
 from rich.logging import RichHandler
 from tqdm import tqdm
 
+from ocr_icelandic import randomness
 from ocr_icelandic.config import DataConfig, GenerationConfig, SingleImageData
+from ocr_icelandic.fonts import get_compatible_fonts, sync_google_fonts
 from ocr_icelandic.image_generator import generate_single_chunk
 from ocr_icelandic.text_processing import split_long_text
+from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
 
 logging.basicConfig(
     level=logging.INFO,

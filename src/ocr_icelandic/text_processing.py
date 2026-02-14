@@ -37,22 +37,3 @@ def split_long_text(text: str, max_length: int) -> list[str]:
         chunks.append(current_chunk.strip())
 
     return chunks
-
-
-def normalize_range(
-    min_value: int, max_value: int, minimum: int = 1
-) -> tuple[int, int]:
-    """
-    Ensure min/max values form a valid range.
-
-    Args:
-        min_value: Minimum value
-        max_value: Maximum value
-        minimum: Minimum allowed value
-
-    Returns:
-        Normalized (min_value, max_value) tuple
-    """
-    min_value = max(minimum, min_value)
-    max_value = max(min_value, max_value)
-    return min_value, max_value
