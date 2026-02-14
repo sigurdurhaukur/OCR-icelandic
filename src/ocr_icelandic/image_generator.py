@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-<<<<<<< HEAD
-import random
-from typing import TYPE_CHECKING, Iterator
-=======
 from typing import TYPE_CHECKING
->>>>>>> main
 
 from ocr_icelandic import randomness
+from ocr_icelandic.config import SingleImageData
 from ocr_icelandic.pipeline.core import Pipeline, PipelineState
 from ocr_icelandic.pipeline.stages.postprocessing import (
     CompositeBackgroundStage,
@@ -20,13 +16,12 @@ from ocr_icelandic.pipeline.stages.rendering import RenderTextStage
 from ocr_icelandic.pipeline.stages.selection import (
     SelectBackgroundImageStage,
     SelectColorsStage,
-    SelectLayoutStage,
     SelectFontStage,
+    SelectLayoutStage,
     SelectPaperTextureStage,
 )
 from ocr_icelandic.pipeline.stages.transformations import ApplyTransformationsStage
 from ocr_icelandic.text_processing import split_long_text
-from ocr_icelandic.config import SingleImageData
 
 if TYPE_CHECKING:
     from ocr_icelandic.config import GenerationConfig
@@ -137,9 +132,7 @@ def generate_single_chunk(
         paragraph_styles = None
 
         if cfg.enable_font_size_variation or cfg.enable_font_styles:
-            from ocr_icelandic.utils.text_layout import (
-                calculate_paragraph_font_sizes,
-            )
+            from ocr_icelandic.utils.text_layout import calculate_paragraph_font_sizes
 
             paragraphs = remaining_text.split("\n\n")
             num_paragraphs = len(paragraphs)
@@ -215,16 +208,6 @@ def generate_single_chunk(
 
 
 def generate_single_text(
-<<<<<<< HEAD
-    text: str, cfg: "GenerationConfig"
-) -> Iterator["SingleImageData"]:
-    """
-    Generate images for a single text entry, yielding one at a time.
-
-    This generator handles text overflow by splitting long text and yielding
-    each generated image individually, allowing for immediate flushing to disk
-    and consistent batch sizes.
-=======
     text: str, cfg: GenerationConfig
 ) -> tuple[list[SingleImageData], int]:
     """
@@ -233,24 +216,17 @@ def generate_single_text(
     This function splits the text into chunks and generates images for each chunk.
     For better parallelization at the chunk level, use generate_single_chunk()
     directly after splitting texts with split_long_text().
->>>>>>> main
 
     Args:
         text: Full text to render as images
         cfg: Generation configuration
 
-<<<<<<< HEAD
-    Yields:
-        SingleImageData for each generated image
-=======
     Returns:
         Tuple of (list of SingleImageData, number of chunks the text was split into)
->>>>>>> main
     """
     # Split long texts first
     text_chunks = split_long_text(text.strip(), cfg.max_text_length)
 
-<<<<<<< HEAD
     for chunk in text_chunks:
         remaining_text = chunk
 
@@ -438,10 +414,3 @@ def _convert_to_rgb(
     elif image.mode != "RGB":
         return image.convert("RGB")
     return image
-=======
-    images: list[SingleImageData] = []
-    for chunk in text_chunks:
-        images.extend(generate_single_chunk(chunk, cfg))
-
-    return images, len(text_chunks)
->>>>>>> main

@@ -40,17 +40,13 @@ python scripts/prepare_data.py \
     paper_texture_probability=0.5 \
 """
 
-from collections import defaultdict
+import gc
 import logging
 import os
-import gc
 import shutil
 import sys
-<<<<<<< HEAD
 from collections import defaultdict
-=======
 from concurrent.futures import ProcessPoolExecutor, as_completed
->>>>>>> main
 from dataclasses import asdict
 from pathlib import Path
 from typing import cast
@@ -63,21 +59,17 @@ from datasets import (
     load_dataset,
     load_from_disk,
 )
-
-from ocr_icelandic import randomness
-from ocr_icelandic.fonts import (
-    get_compatible_fonts,
-    sync_google_fonts,
-)
-from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
 from omegaconf import OmegaConf
 from PIL import Image as PILImage
 from rich.logging import RichHandler
 from tqdm import tqdm
 
+from ocr_icelandic import randomness
 from ocr_icelandic.config import DataConfig, GenerationConfig, SingleImageData
+from ocr_icelandic.fonts import get_compatible_fonts, sync_google_fonts
 from ocr_icelandic.image_generator import generate_single_chunk
 from ocr_icelandic.text_processing import split_long_text
+from ocr_icelandic.utils import discover_backgrounds, discover_paper_textures
 
 logging.basicConfig(
     level=logging.INFO,
@@ -246,23 +238,6 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     batch_datasets: list[str] = []
     new_data: defaultdict[str, list] = defaultdict(list)
     batch_idx = 0
-<<<<<<< HEAD
-    total_images = 0
-
-    logger.info(
-        "Processing texts sequentially with immediate batch flushing (batch_size=%d).",
-        cfg.batch_size,
-    )
-
-    # Process texts sequentially, yielding images one at a time for consistent batch sizes
-    for text in tqdm(texts[:num_examples], desc="Processing texts", unit="text"):
-        try:
-            for image_data in generate_single_text(text, generation_cfg):
-                _process_image_data(image_data, cfg.text_column, new_data)
-                total_images += 1
-
-                # Flush batch IMMEDIATELY when threshold reached
-=======
 
     # Scale workers with chunk count, not text count
     max_workers = min(cfg.max_workers, len(all_chunks))
@@ -298,7 +273,6 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     _process_image_data(image_data, cfg.text_column, new_data)
 
                 # Flush batch when threshold reached
->>>>>>> main
                 if len(new_data["image"]) >= cfg.batch_size:
                     batch_path = _save_batch_to_disk(new_data, batch_dir, batch_idx)
                     batch_datasets.append(batch_path)
@@ -311,15 +285,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     new_data = defaultdict(list)
                     gc.collect()
 
-<<<<<<< HEAD
-        except (OSError, ValueError, RuntimeError) as e:
-            logger.error("Error processing text: %s", e)
-            continue
-=======
             except (OSError, ValueError, RuntimeError) as e:
                 logger.error("Error processing chunk: %s", e)
                 continue
->>>>>>> main
 
     # Save remaining data
     if new_data["image"]:
@@ -334,12 +302,7 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
         gc.collect()
 
     logger.info(
-<<<<<<< HEAD
-        "Generated %d total images in %d batches.",
-        total_images,
-=======
         "Generated %d batches from %d chunks.",
->>>>>>> main
         len(batch_datasets),
         len(all_chunks),
     )
