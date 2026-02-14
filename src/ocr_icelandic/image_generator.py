@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Iterator
 
 from PIL import Image as PILImage
 
@@ -18,22 +18,25 @@ if TYPE_CHECKING:
 
 def generate_single_text(
     text: str, cfg: "GenerationConfig"
-) -> tuple[list["SingleImageData"], int]:
+) -> Iterator["SingleImageData"]:
     """
-    Generate images for a single text entry, handling overflow.
+    Generate images for a single text entry, yielding one at a time.
+
+    This generator handles text overflow by splitting long text and yielding
+    each generated image individually, allowing for immediate flushing to disk
+    and consistent batch sizes.
 
     Args:
         text: The text to convert to images
         cfg: Configuration for image generation
 
-    Returns:
-        Tuple of (list of SingleImageData, number of text splits)
+    Yields:
+        SingleImageData for each generated image
     """
     # Import here to avoid circular imports
     from ocr_icelandic.config import SingleImageData
 
     text_chunks = split_long_text(text.strip(), cfg.max_text_length)
-    images: list[SingleImageData] = []
 
     for chunk in text_chunks:
         remaining_text = chunk
@@ -78,27 +81,23 @@ def generate_single_text(
                 transformed_image, settings["composite_bg_color"]
             )
 
-            images.append(
-                SingleImageData(
-                    text=fitted_text,
-                    image=final_image,
-                    font_path=settings["font_path"],
-                    bg_color=settings["bg_color"],
-                    font_color=settings["font_color"],
-                    font_size=settings["font_size"],
-                    image_width=cfg.image_width,
-                    image_height=cfg.image_height,
-                    image_dpi=cfg.image_dpi,
-                    text_vertical_alignment=cfg.text_vertical_alignment,
-                    text_horizontal_alignment=cfg.text_horizontal_alignment,
-                    paragraph_bboxes=transformed_bboxes,
-                    transformations=transformation_meta,
-                )
+            yield SingleImageData(
+                text=fitted_text,
+                image=final_image,
+                font_path=settings["font_path"],
+                bg_color=settings["bg_color"],
+                font_color=settings["font_color"],
+                font_size=settings["font_size"],
+                image_width=cfg.image_width,
+                image_height=cfg.image_height,
+                image_dpi=cfg.image_dpi,
+                text_vertical_alignment=cfg.text_vertical_alignment,
+                text_horizontal_alignment=cfg.text_horizontal_alignment,
+                paragraph_bboxes=transformed_bboxes,
+                transformations=transformation_meta,
             )
 
             remaining_text = remaining_text[len(fitted_text) :].lstrip()
-
-    return images, len(text_chunks)
 
 
 def _resolve_random_settings(cfg: "GenerationConfig") -> dict:

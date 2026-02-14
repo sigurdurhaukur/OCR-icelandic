@@ -28,7 +28,7 @@ python scripts/prepare_data.py \
     text_column="document" \
     data_directory="parla" \
     split="train" \
-    max_entries=1 \
+    max_entries=100 \
     column_range="[1,1]" \
     max_workers=1 \
     local_output_dir="isl_synthetic_ocr_output_v3" \
@@ -46,7 +46,6 @@ import os
 import shutil
 import sys
 from collections import defaultdict
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
 from typing import cast
@@ -213,37 +212,21 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
     batch_datasets: list[str] = []
     new_data: defaultdict[str, list] = defaultdict(list)
     batch_idx = 0
-    total_splits = 0
-    split_texts = 0
+    total_images = 0
 
-    max_workers = min(cfg.max_workers, len(texts[:num_examples]))
     logger.info(
-        "Using %d parallel workers for image generation (batch_size=%d).",
-        max_workers,
+        "Processing texts sequentially with immediate batch flushing (batch_size=%d).",
         cfg.batch_size,
     )
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(generate_single_text, text, generation_cfg): text
-            for text in texts[:num_examples]
-        }
+    # Process texts sequentially, yielding images one at a time for consistent batch sizes
+    for text in tqdm(texts[:num_examples], desc="Processing texts", unit="text"):
+        try:
+            for image_data in generate_single_text(text, generation_cfg):
+                _process_image_data(image_data, cfg.text_column, new_data)
+                total_images += 1
 
-        for future in tqdm(
-            as_completed(futures),
-            total=len(futures),
-            desc="Processing texts",
-            unit="text",
-        ):
-            try:
-                image_data_list, num_splits = future.result()
-                total_splits += num_splits
-                split_texts += 1 if num_splits > 1 else 0
-
-                for image_data in image_data_list:
-                    _process_image_data(image_data, cfg.text_column, new_data)
-
-                # Flush batch when threshold reached
+                # Flush batch IMMEDIATELY when threshold reached
                 if len(new_data["image"]) >= cfg.batch_size:
                     batch_path = _save_batch_to_disk(new_data, batch_dir, batch_idx)
                     batch_datasets.append(batch_path)
@@ -256,9 +239,9 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
                     new_data = defaultdict(list)
                     gc.collect()
 
-            except (OSError, ValueError, RuntimeError) as e:
-                logger.error("Error processing text: %s", e)
-                continue
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error("Error processing text: %s", e)
+            continue
 
     # Save remaining data
     if new_data["image"]:
@@ -273,8 +256,8 @@ def generate_image_dataset(texts: list[str], cfg: DataConfig) -> Dataset:
         gc.collect()
 
     logger.info(
-        "Split %d long texts into multiple chunks, generating %d batches.",
-        split_texts,
+        "Generated %d total images in %d batches.",
+        total_images,
         len(batch_datasets),
     )
 
